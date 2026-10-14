@@ -18,8 +18,8 @@ export async function GET() {
   }
 
   // 2. Validate server environment
-  let supabaseUrl: string | undefined;
-  let serviceRoleKey: string | undefined;
+  let supabaseUrl: string;
+  let serviceRoleKey: string;
   try {
     ({ supabaseUrl, serviceRoleKey } = validateServerEnv());
   } catch {
@@ -30,7 +30,7 @@ export async function GET() {
   }
 
   // 3. Create service-role client
-  const adminClient = createServiceRoleClient(supabaseUrl as string, serviceRoleKey as string);
+  const adminClient = createServiceRoleClient(supabaseUrl, serviceRoleKey);
 
   // 4. Paginate auth.admin.listUsers() and filter server-side to Admin users only
   try {
