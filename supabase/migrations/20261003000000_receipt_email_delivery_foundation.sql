@@ -2,6 +2,7 @@
 -- Migration: 20261003000000_receipt_email_delivery_foundation
 --
 -- Phase 7B-11B — Receipt Email Delivery Database Foundation
+-- (Hardened in Phase 7B-11B1 — Finalizer Stale-Attempt Protection)
 --
 -- PURPOSE
 -- -------
@@ -23,9 +24,9 @@
 -- 9.  Adds a delivery_status index
 -- 10. Creates BEFORE UPDATE state-machine trigger function + trigger
 -- 11. Creates public.claim_receipt_email_delivery(p_payment_id, p_admin_user_id)
--- 12. Creates public.complete_receipt_email_delivery_success(p_delivery_id, p_provider_message_id)
--- 13. Creates public.complete_receipt_email_delivery_failure(p_delivery_id, p_error_code, p_error_message)
--- 14. Creates public.mark_receipt_email_delivery_uncertain(p_delivery_id, p_error_code, p_error_message)
+-- 12. Creates public.complete_receipt_email_delivery_success(p_delivery_id, p_attempt_count, p_provider_message_id)
+-- 13. Creates public.complete_receipt_email_delivery_failure(p_delivery_id, p_attempt_count, p_error_code, p_error_message)
+-- 14. Creates public.mark_receipt_email_delivery_uncertain(p_delivery_id, p_attempt_count, p_error_code, p_error_message, p_provider_message_id DEFAULT NULL)
 -- 15. REVOKE/GRANT permissions on all RPCs (service_role only)
 --
 -- DESIGN DECISIONS
@@ -56,6 +57,11 @@
 --   receipt_pdf_storage_path
 --   receipt_pdf_generated_at
 --   receipt_pdf_hash
+--
+-- Stale-attempt protection: All three finalizer RPCs accept p_attempt_count.
+-- If row.attempt_count != p_attempt_count the RPC raises
+-- receipt_email_delivery_stale_attempt. This prevents a late result from
+-- attempt N from finalizing attempt N+1.
 --
 -- RLS DECISION
 -- ------------
@@ -444,6 +450,12 @@ GRANT EXECUTE ON FUNCTION public.crm_receipt_email_deliveries_state_guard_fn()
 --   already_sent      — delivery already confirmed sent; do not resend
 --   currently_sending — a send is already in progress (not stale)
 --   uncertain         — delivery outcome unknown; do not auto-retry
+--
+-- The authoritative attempt_count returned for 'claimed' and
+-- 'retry_claimed' outcomes MUST be passed by the dispatcher to
+-- whichever finalizer RPC is called. For 'already_sent',
+-- 'currently_sending', and 'uncertain' outcomes the dispatcher
+-- must NOT call a finalizer.
 --
 -- ADMIN AUTHORIZATION
 -- -------------------
@@ -843,6 +855,7 @@ GRANT EXECUTE ON FUNCTION public.claim_receipt_email_delivery(UUID, UUID)
 -- Signature:
 --   public.complete_receipt_email_delivery_success(
 --     p_delivery_id         UUID,
+--     p_attempt_count       INTEGER,
 --     p_provider_message_id TEXT
 --   )
 --
@@ -858,9 +871,9 @@ GRANT EXECUTE ON FUNCTION public.claim_receipt_email_delivery(UUID, UUID)
 --
 -- VALIDATION
 -- ----------
--- - delivery row must exist
+-- - p_attempt_count must be NOT NULL and > 0
 -- - p_provider_message_id must be non-null and nonblank
--- - delivery_status must be 'sending'
+-- - delivery row must exist
 --
 -- IDEMPOTENCY
 -- -----------
@@ -869,11 +882,19 @@ GRANT EXECUTE ON FUNCTION public.claim_receipt_email_delivery(UUID, UUID)
 -- If status = 'sent' AND provider_message_id differs:
 --   raises an integrity error (never overwrite a sent record).
 --
+-- STALE ATTEMPT PROTECTION
+-- ------------------------
+-- After the idempotency check, if row.attempt_count != p_attempt_count:
+--   raises receipt_email_delivery_stale_attempt.
+-- A late result from attempt N must never finalize attempt N+1.
+-- Mirrors complete_invoice_email_delivery_success ordering exactly.
+--
 -- sent becomes terminal.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.complete_receipt_email_delivery_success(
   p_delivery_id         UUID,
+  p_attempt_count       INTEGER,
   p_provider_message_id TEXT
 )
 RETURNS TABLE (
@@ -896,6 +917,12 @@ BEGIN
 
   -- ── Input validation ──────────────────────────────────────────────────────
 
+  IF p_attempt_count IS NULL OR p_attempt_count <= 0 THEN
+    RAISE EXCEPTION 'receipt_email_delivery_invalid_input'
+      USING ERRCODE = 'P0001',
+            DETAIL  = 'p_attempt_count must be NOT NULL and greater than 0.';
+  END IF;
+
   IF p_provider_message_id IS NULL OR trim(p_provider_message_id) = '' THEN
     RAISE EXCEPTION 'receipt_email_delivery_invalid_input'
       USING ERRCODE = 'P0001',
@@ -917,7 +944,8 @@ BEGIN
             DETAIL  = 'Delivery row does not exist.';
   END IF;
 
-  -- ── Idempotency: already sent with same message ID ────────────────────────
+  -- ── Idempotency: already sent — check before stale-attempt guard ──────────
+  -- Mirror invoice RPC ordering: idempotency check precedes attempt_count check.
 
   IF v_delivery.delivery_status = 'sent' THEN
     IF v_delivery.provider_message_id = v_msg_id THEN
@@ -935,6 +963,21 @@ BEGIN
               DETAIL  = 'Delivery row is already sent with a different provider_message_id. '
                         'Cannot overwrite a confirmed sent record.';
     END IF;
+  END IF;
+
+  -- ── Stale attempt protection ──────────────────────────────────────────────
+  -- If the current attempt_count does not match p_attempt_count, an older
+  -- request is trying to complete a newer retry. Reject it.
+  -- A late result from attempt N must never finalize attempt N+1.
+
+  IF v_delivery.attempt_count != p_attempt_count THEN
+    RAISE EXCEPTION 'receipt_email_delivery_stale_attempt'
+      USING ERRCODE = 'P0001',
+            DETAIL  = format(
+              'Stale attempt: current attempt_count is %s but p_attempt_count is %s. '
+              'This completion request is for an outdated send attempt.',
+              v_delivery.attempt_count, p_attempt_count
+            );
   END IF;
 
   -- ── Normal success: require sending state ─────────────────────────────────
@@ -975,16 +1018,16 @@ $func$;
 -- SECTION 10: GRANT / REVOKE EXECUTE ON complete_receipt_email_delivery_success
 -- ============================================================
 
-REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, TEXT)
+REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, INTEGER, TEXT)
   FROM PUBLIC;
 
-REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, TEXT)
+REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, INTEGER, TEXT)
   FROM anon;
 
-REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, TEXT)
+REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, INTEGER, TEXT)
   FROM authenticated;
 
-GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, TEXT)
+GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, INTEGER, TEXT)
   TO service_role;
 
 
@@ -1000,6 +1043,7 @@ GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, T
 -- Signature:
 --   public.complete_receipt_email_delivery_failure(
 --     p_delivery_id   UUID,
+--     p_attempt_count INTEGER,
 --     p_error_code    TEXT,
 --     p_error_message TEXT
 --   )
@@ -1015,7 +1059,14 @@ GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, T
 --
 -- VALIDATION
 -- ----------
--- - delivery_status must be 'sending'
+-- - p_attempt_count must be > 0
+-- - delivery row must exist
+--
+-- STALE ATTEMPT PROTECTION
+-- ------------------------
+-- If row.attempt_count != p_attempt_count:
+--   raises receipt_email_delivery_stale_attempt.
+-- A late failure from an older attempt must not mark a newer attempt failed.
 --
 -- SAFETY
 -- ------
@@ -1029,6 +1080,7 @@ GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_success(UUID, T
 
 CREATE OR REPLACE FUNCTION public.complete_receipt_email_delivery_failure(
   p_delivery_id   UUID,
+  p_attempt_count INTEGER,
   p_error_code    TEXT,
   p_error_message TEXT
 )
@@ -1050,6 +1102,14 @@ DECLARE
 BEGIN
 
   v_now := now();
+
+  -- ── Input validation ──────────────────────────────────────────────────────
+
+  IF p_attempt_count IS NULL OR p_attempt_count <= 0 THEN
+    RAISE EXCEPTION 'receipt_email_delivery_invalid_input'
+      USING ERRCODE = 'P0001',
+            DETAIL  = 'p_attempt_count must be greater than 0.';
+  END IF;
 
   -- Normalize error fields — store NULL for blank codes, truncate messages
   v_error_code    := NULLIF(trim(COALESCE(p_error_code, '')), '');
@@ -1082,6 +1142,19 @@ BEGIN
       USING ERRCODE = 'P0001',
             DETAIL  = 'Cannot record failure: delivery is already in uncertain state. '
                       'Manual admin intervention is required.';
+  END IF;
+
+  -- ── Stale attempt protection ──────────────────────────────────────────────
+  -- A late failure from an older attempt must not mark a newer attempt failed.
+
+  IF v_delivery.attempt_count != p_attempt_count THEN
+    RAISE EXCEPTION 'receipt_email_delivery_stale_attempt'
+      USING ERRCODE = 'P0001',
+            DETAIL  = format(
+              'Stale attempt: current attempt_count is %s but p_attempt_count is %s. '
+              'This failure request is for an outdated send attempt.',
+              v_delivery.attempt_count, p_attempt_count
+            );
   END IF;
 
   -- ── Require sending state ─────────────────────────────────────────────────
@@ -1122,16 +1195,16 @@ $func$;
 -- SECTION 12: GRANT / REVOKE EXECUTE ON complete_receipt_email_delivery_failure
 -- ============================================================
 
-REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, TEXT, TEXT)
+REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, INTEGER, TEXT, TEXT)
   FROM PUBLIC;
 
-REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, TEXT, TEXT)
+REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, INTEGER, TEXT, TEXT)
   FROM anon;
 
-REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, TEXT, TEXT)
+REVOKE EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, INTEGER, TEXT, TEXT)
   FROM authenticated;
 
-GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, TEXT, TEXT)
+GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, INTEGER, TEXT, TEXT)
   TO service_role;
 
 
@@ -1149,9 +1222,11 @@ GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, T
 --
 -- Signature:
 --   public.mark_receipt_email_delivery_uncertain(
---     p_delivery_id   UUID,
---     p_error_code    TEXT,
---     p_error_message TEXT
+--     p_delivery_id         UUID,
+--     p_attempt_count       INTEGER,
+--     p_error_code          TEXT,
+--     p_error_message       TEXT,
+--     p_provider_message_id TEXT DEFAULT NULL
 --   )
 --
 -- Returns TABLE:
@@ -1165,7 +1240,24 @@ GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, T
 --
 -- VALIDATION
 -- ----------
--- - delivery_status must be 'sending'
+-- - p_attempt_count must be > 0
+-- - delivery row must exist
+--
+-- STALE ATTEMPT PROTECTION
+-- ------------------------
+-- If row.attempt_count != p_attempt_count:
+--   raises receipt_email_delivery_stale_attempt.
+-- A stale uncertain result must not mark a newer attempt uncertain.
+--
+-- PROVIDER MESSAGE ID PRESERVATION
+-- ---------------------------------
+-- p_provider_message_id is optional (DEFAULT NULL).
+-- NULL/blank input → normalized to NULL (no change to existing value).
+-- Non-blank input → stored in provider_message_id (preserves a known
+-- message ID when one is available during an uncertain outcome).
+-- Uses COALESCE(v_msg_id, provider_message_id) to leave existing value
+-- unchanged when no new value is provided.
+-- Mirrors mark_invoice_email_delivery_uncertain behavior exactly.
 --
 -- SAFETY
 -- ------
@@ -1176,9 +1268,11 @@ GRANT EXECUTE ON FUNCTION public.complete_receipt_email_delivery_failure(UUID, T
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.mark_receipt_email_delivery_uncertain(
-  p_delivery_id   UUID,
-  p_error_code    TEXT,
-  p_error_message TEXT
+  p_delivery_id         UUID,
+  p_attempt_count       INTEGER,
+  p_error_code          TEXT,
+  p_error_message       TEXT,
+  p_provider_message_id TEXT DEFAULT NULL
 )
 RETURNS TABLE (
   outcome         TEXT,
@@ -1194,15 +1288,28 @@ DECLARE
   v_delivery      public.crm_receipt_email_deliveries%ROWTYPE;
   v_error_code    TEXT;
   v_error_message TEXT;
+  v_msg_id        TEXT;
   v_now           TIMESTAMPTZ;
 BEGIN
 
   v_now := now();
 
+  -- ── Input validation ──────────────────────────────────────────────────────
+
+  IF p_attempt_count IS NULL OR p_attempt_count <= 0 THEN
+    RAISE EXCEPTION 'receipt_email_delivery_invalid_input'
+      USING ERRCODE = 'P0001',
+            DETAIL  = 'p_attempt_count must be greater than 0.';
+  END IF;
+
   -- Normalize error fields
   v_error_code    := NULLIF(trim(COALESCE(p_error_code, '')), '');
   v_error_message := left(trim(COALESCE(p_error_message, '')), 1000);
   IF v_error_message = '' THEN v_error_message := NULL; END IF;
+
+  -- Normalize optional provider_message_id: NULL/blank → NULL
+  -- Non-blank → stored (preserves known message ID during uncertain outcome)
+  v_msg_id := NULLIF(trim(COALESCE(p_provider_message_id, '')), '');
 
   -- ── Lock delivery row FOR UPDATE ──────────────────────────────────────────
 
@@ -1217,6 +1324,19 @@ BEGIN
             DETAIL  = 'Delivery row does not exist.';
   END IF;
 
+  -- ── Stale attempt protection ──────────────────────────────────────────────
+  -- A stale uncertain result must not mark a newer attempt uncertain.
+
+  IF v_delivery.attempt_count != p_attempt_count THEN
+    RAISE EXCEPTION 'receipt_email_delivery_stale_attempt'
+      USING ERRCODE = 'P0001',
+            DETAIL  = format(
+              'Stale attempt: current attempt_count is %s but p_attempt_count is %s. '
+              'This uncertain request is for an outdated send attempt.',
+              v_delivery.attempt_count, p_attempt_count
+            );
+  END IF;
+
   -- ── Require sending state ─────────────────────────────────────────────────
 
   IF v_delivery.delivery_status != 'sending' THEN
@@ -1229,14 +1349,17 @@ BEGIN
   END IF;
 
   -- ── Apply uncertain transition ────────────────────────────────────────────
-  -- sent_at is NOT set
+  -- sent_at is NOT set.
+  -- provider_message_id: stored only if known (non-blank); otherwise
+  -- existing value is preserved via COALESCE(v_msg_id, provider_message_id).
 
   UPDATE public.crm_receipt_email_deliveries
   SET
-    delivery_status    = 'uncertain',
-    last_error_code    = v_error_code,
-    last_error_message = v_error_message,
-    updated_at         = v_now
+    delivery_status     = 'uncertain',
+    provider_message_id = COALESCE(v_msg_id, provider_message_id),
+    last_error_code     = v_error_code,
+    last_error_message  = v_error_message,
+    updated_at          = v_now
   WHERE id = p_delivery_id;
 
   RETURN QUERY SELECT
@@ -1254,16 +1377,16 @@ $func$;
 -- SECTION 14: GRANT / REVOKE EXECUTE ON mark_receipt_email_delivery_uncertain
 -- ============================================================
 
-REVOKE EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, TEXT, TEXT)
+REVOKE EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, INTEGER, TEXT, TEXT, TEXT)
   FROM PUBLIC;
 
-REVOKE EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, TEXT, TEXT)
+REVOKE EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, INTEGER, TEXT, TEXT, TEXT)
   FROM anon;
 
-REVOKE EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, TEXT, TEXT)
+REVOKE EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, INTEGER, TEXT, TEXT, TEXT)
   FROM authenticated;
 
-GRANT EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, TEXT, TEXT)
+GRANT EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, INTEGER, TEXT, TEXT, TEXT)
   TO service_role;
 
 
@@ -1280,9 +1403,9 @@ GRANT EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, TEX
 -- Functions Created
 --   public.crm_receipt_email_deliveries_state_guard_fn()  [trigger function]
 --   public.claim_receipt_email_delivery(UUID, UUID)
---   public.complete_receipt_email_delivery_success(UUID, TEXT)
---   public.complete_receipt_email_delivery_failure(UUID, TEXT, TEXT)
---   public.mark_receipt_email_delivery_uncertain(UUID, TEXT, TEXT)
+--   public.complete_receipt_email_delivery_success(UUID, INTEGER, TEXT)
+--   public.complete_receipt_email_delivery_failure(UUID, INTEGER, TEXT, TEXT)
+--   public.mark_receipt_email_delivery_uncertain(UUID, INTEGER, TEXT, TEXT, TEXT)
 --
 -- A. UNIQUE(payment_id)
 --   YES — crm_receipt_email_deliveries_unique_payment_id constraint
@@ -1332,6 +1455,33 @@ GRANT EXECUTE ON FUNCTION public.mark_receipt_email_delivery_uncertain(UUID, TEX
 --
 -- N. Migration not deployed
 --   YES — file created only, not pushed to Supabase
+--
+-- Claim returns attempt_count
+--   YES — returned for claimed and retry_claimed outcomes
+--   The dispatcher must pass this value to whichever finalizer is called.
+--   For already_sent, currently_sending, uncertain: no finalizer is called.
+--
+-- Success stale-attempt protection
+--   YES — complete_receipt_email_delivery_success(UUID, INTEGER, TEXT)
+--   raises receipt_email_delivery_stale_attempt if row.attempt_count != p_attempt_count
+--   Idempotency check (already_sent) precedes stale-attempt check (mirrors invoice RPC)
+--
+-- Failure stale-attempt protection
+--   YES — complete_receipt_email_delivery_failure(UUID, INTEGER, TEXT, TEXT)
+--   raises receipt_email_delivery_stale_attempt if row.attempt_count != p_attempt_count
+--
+-- Uncertain stale-attempt protection
+--   YES — mark_receipt_email_delivery_uncertain(UUID, INTEGER, TEXT, TEXT, TEXT)
+--   raises receipt_email_delivery_stale_attempt if row.attempt_count != p_attempt_count
+--
+-- Uncertain provider_message_id preservation
+--   YES — COALESCE(v_msg_id, provider_message_id) preserves known message ID
+--   NULL/blank p_provider_message_id leaves existing value unchanged
+--
+-- Permissions
+--   complete_receipt_email_delivery_success(UUID, INTEGER, TEXT)   → service_role only
+--   complete_receipt_email_delivery_failure(UUID, INTEGER, TEXT, TEXT) → service_role only
+--   mark_receipt_email_delivery_uncertain(UUID, INTEGER, TEXT, TEXT, TEXT) → service_role only
 --
 -- Emails Sent
 --   0

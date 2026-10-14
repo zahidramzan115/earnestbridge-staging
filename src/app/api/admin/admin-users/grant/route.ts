@@ -21,8 +21,8 @@ export async function POST(request: NextRequest) {
   }
 
   // 2. Validate server environment
-  let supabaseUrl: string;
-  let serviceRoleKey: string;
+  let supabaseUrl: string | undefined;
+  let serviceRoleKey: string | undefined;
   try {
     ({ supabaseUrl, serviceRoleKey } = validateServerEnv());
   } catch {
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 5. Create service-role client
-  const adminClient = createServiceRoleClient(supabaseUrl, serviceRoleKey);
+  const adminClient = createServiceRoleClient(supabaseUrl!, serviceRoleKey!);
 
   // 6. Find exact Auth user by email via paginated listUsers
   let targetUser;
