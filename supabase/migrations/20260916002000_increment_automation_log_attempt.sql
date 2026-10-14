@@ -1,0 +1,10 @@
+-- ============================================================
+-- SUPERSEDED — DO NOT USE
+-- ============================================================
+-- This file has been superseded by:
+--   20260916002000_fix_option_cycle_claim_attempt_count.sql
+--
+-- This file was renamed before being pushed to production.
+-- It contains NO executable SQL and will not affect the database.
+-- The canonical migration is the file named above.
+-- ============================================================
