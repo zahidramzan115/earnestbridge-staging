@@ -177,7 +177,7 @@ export async function GET(
   const { data: paymentRows, error: paymentError } = await supabase
     .from('crm_payments')
     .select(
-      'id, invoice_id, payment_method, status, amount_cents, currency, ' + 'received_at, reference_number, notes, recorded_by, created_at'
+      'id, invoice_id, payment_method, status, amount_cents, currency, ' + 'received_at, reference_number, notes, recorded_by, created_at, ' + 'receipt_number, receipt_pdf_generated_at'
     )
     .eq('invoice_id', id)
     .order('received_at', { ascending: true, nullsFirst: false })

@@ -2114,7 +2114,11 @@ const AdminInvoiceDetailContent: React.FC = () => {
 
             {/* Payment History — shown for open, partially_paid, paid, void */}
             {['open', 'partially_paid', 'paid', 'void'].includes(invoice.status) && (
-              <PaymentHistorySection payments={paymentHistory} />
+              <PaymentHistorySection
+                payments={paymentHistory}
+                invoiceId={invoiceId as string}
+                onReceiptGenerated={loadInvoice}
+              />
             )}
 
           </div>
