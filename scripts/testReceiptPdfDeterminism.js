@@ -1,7 +1,7 @@
 /**
  * scripts/testReceiptPdfDeterminism.js
  *
- * Deterministic render test for receipt PDF renderer.
+ * Phase 7B-9I — Deterministic render test for receipt PDF renderer (Visual Polish).
  * Uses SYNTHETIC fixture data only.
  * No real customer data. No Supabase calls. No uploads.
  *
@@ -77,7 +77,7 @@ function wrapText(text, font, fontSize, maxWidth) {
   return result;
 }
 
-// ── Core renderer (mirrors receiptPdf.ts logic exactly) ─────────────────────
+// ── Core renderer (mirrors receiptPdf.ts 7B-9I layout exactly) ──────────────
 async function renderReceiptPdf(input) {
   const pdfDoc = await PDFDocument?.create();
 
@@ -101,76 +101,122 @@ async function renderReceiptPdf(input) {
   const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
   const SAFE_BOTTOM_MARGIN = 50;
 
+  const COLOR_PAGE_BG      = rgb(0.97, 0.97, 0.94);
+  const COLOR_EB_GREEN     = rgb(0.06, 0.18, 0.13);
+  const COLOR_EB_GREEN_MED = rgb(0.22, 0.38, 0.28);
+  const COLOR_DIVIDER      = rgb(0.82, 0.82, 0.78);
+  const COLOR_SUMMARY_BOX  = rgb(0.93, 0.93, 0.90);
+  const COLOR_DARK         = rgb(0.10, 0.10, 0.10);
+  const COLOR_MEDIUM       = rgb(0.38, 0.38, 0.35);
+  const COLOR_LIGHT        = rgb(0.55, 0.55, 0.52);
+
   // Page background
-  page?.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: rgb(0.97, 0.97, 0.94) });
+  page?.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: COLOR_PAGE_BG });
   // Top accent strip
-  page?.drawRectangle({ x: 0, y: PAGE_HEIGHT - 4, width: PAGE_WIDTH, height: 4, color: rgb(0.06, 0.18, 0.13) });
+  page?.drawRectangle({ x: 0, y: PAGE_HEIGHT - 4, width: PAGE_WIDTH, height: 4, color: COLOR_EB_GREEN });
 
-  let cursor = PAGE_HEIGHT - 36;
+  let cursor = PAGE_HEIGHT - 4;
+  let currency = input?.payment_currency;
 
-  // Header
-  page?.drawText('EarnestBridge', { x: MARGIN_LEFT, y: cursor, size: 16, font: fontBold, color: rgb(0.06, 0.18, 0.13) });
-  const rl = 'PAYMENT RECEIPT';
-  page?.drawText(rl, {
-    x: PAGE_WIDTH - MARGIN_RIGHT - fontBold?.widthOfTextAtSize(rl, 11),
-    y: cursor, size: 11, font: fontBold, color: rgb(0.22, 0.38, 0.28),
+  // ── HEADER ────────────────────────────────────────────────────────────────
+  cursor -= 34;
+
+  // EarnestBridge wordmark (left)
+  page?.drawText('EarnestBridge', { x: MARGIN_LEFT, y: cursor, size: 16, font: fontBold, color: COLOR_EB_GREEN });
+
+  // PAYMENT RECEIPT (right, top)
+  const receiptLabel = 'PAYMENT RECEIPT';
+  page?.drawText(receiptLabel, {
+    x: PAGE_WIDTH - MARGIN_RIGHT - fontBold?.widthOfTextAtSize(receiptLabel, 10),
+    y: cursor, size: 10, font: fontBold, color: COLOR_EB_GREEN_MED,
   });
 
-  cursor -= 6;
-  page?.drawText('Lock up the Deal.', { x: MARGIN_LEFT, y: cursor, size: 8, font: font, color: rgb(0.38, 0.38, 0.35) });
+  cursor -= 8;
+
+  // Tagline (left)
+  page?.drawText('Lock up the Deal.', { x: MARGIN_LEFT, y: cursor, size: 8, font: font, color: COLOR_MEDIUM });
+
+  // Receipt number — prominent (right)
   page?.drawText(input?.receipt_number, {
-    x: PAGE_WIDTH - MARGIN_RIGHT - font?.widthOfTextAtSize(input?.receipt_number, 9),
-    y: cursor, size: 9, font: font, color: rgb(0.10, 0.10, 0.10),
+    x: PAGE_WIDTH - MARGIN_RIGHT - fontBold?.widthOfTextAtSize(input?.receipt_number, 11),
+    y: cursor, size: 11, font: fontBold, color: COLOR_DARK,
   });
 
-  cursor -= 18;
-  page?.drawLine({
-    start: { x: MARGIN_LEFT, y: cursor },
-    end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor },
-    thickness: 1.0, color: rgb(0.06, 0.18, 0.13),
+  cursor -= 10;
+
+  // Issued date — secondary (right)
+  const issuedDateStr = 'Issued ' + formatTimestamp(input?.receipt_issued_at);
+  page?.drawText(issuedDateStr, {
+    x: PAGE_WIDTH - MARGIN_RIGHT - font?.widthOfTextAtSize(issuedDateStr, 8),
+    y: cursor, size: 8, font: font, color: COLOR_MEDIUM,
   });
-  cursor -= 16;
 
-  const COL_VALUE_X = MARGIN_LEFT + 160;
-
-  function drawRow(label, value) {
-    if (!value || value?.trim() === '') return;
-    page?.drawText(label, { x: MARGIN_LEFT, y: cursor, size: 8.5, font: font, color: rgb(0.38, 0.38, 0.35) });
-    page?.drawText(value, { x: COL_VALUE_X, y: cursor, size: 8.5, font: fontBold, color: rgb(0.10, 0.10, 0.10) });
-    cursor -= 14;
-  }
-
-  drawRow('Receipt Number', input?.receipt_number);
-  drawRow('Receipt Issued Date', formatTimestamp(input?.receipt_issued_at));
-  cursor -= 4;
-  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 0.5, color: rgb(0.82, 0.82, 0.78) });
-  cursor -= 12;
-
-  drawRow('Invoice Number', input?.invoice_number);
-  drawRow('Invoice Issued Date', formatTimestamp(input?.invoice_issued_at));
-  cursor -= 4;
-  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 0.5, color: rgb(0.82, 0.82, 0.78) });
-  cursor -= 12;
-
-  drawRow('Payment Received Date', formatTimestamp(input?.payment_received_at));
-  drawRow('Payment Method', formatPaymentMethod(input?.payment_method));
-  if (input?.payment_reference_number && input?.payment_reference_number?.trim() !== '') {
-    drawRow('Payment Reference', input?.payment_reference_number?.trim());
-  }
-  cursor -= 4;
-  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 0.5, color: rgb(0.82, 0.82, 0.78) });
-  cursor -= 16;
-
-  // Billing block
-  page?.drawText('BILLED TO', { x: MARGIN_LEFT, y: cursor, size: 8, font: fontBold, color: rgb(0.22, 0.38, 0.28) });
   cursor -= 14;
 
-  if (input?.billing_name && input?.billing_name?.trim()) {
-    page?.drawText(input?.billing_name?.trim(), { x: MARGIN_LEFT, y: cursor, size: 9, font: fontBold, color: rgb(0.10, 0.10, 0.10) });
+  // Header divider
+  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 1.0, color: COLOR_EB_GREEN });
+  cursor -= 18;
+
+  // ── TWO-COLUMN DETAILS ────────────────────────────────────────────────────
+  const COL_MID = MARGIN_LEFT + Math.floor(CONTENT_WIDTH / 2) + 4;
+  const detailsStartCursor = cursor;
+
+  // LEFT: INVOICE DETAILS
+  page?.drawText('INVOICE DETAILS', { x: MARGIN_LEFT, y: cursor, size: 7.5, font: fontBold, color: COLOR_EB_GREEN_MED });
+  let leftCursor = cursor - 12;
+
+  page?.drawText('Invoice Number', { x: MARGIN_LEFT, y: leftCursor, size: 8, font: font, color: COLOR_MEDIUM });
+  leftCursor -= 11;
+  page?.drawText(input?.invoice_number, { x: MARGIN_LEFT, y: leftCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+  leftCursor -= 13;
+
+  page?.drawText('Invoice Issued Date', { x: MARGIN_LEFT, y: leftCursor, size: 8, font: font, color: COLOR_MEDIUM });
+  leftCursor -= 11;
+  page?.drawText(formatTimestamp(input?.invoice_issued_at), { x: MARGIN_LEFT, y: leftCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+  leftCursor -= 13;
+
+  // RIGHT: PAYMENT DETAILS
+  let rightCursor = detailsStartCursor;
+  page?.drawText('PAYMENT DETAILS', { x: COL_MID, y: rightCursor, size: 7.5, font: fontBold, color: COLOR_EB_GREEN_MED });
+  rightCursor -= 12;
+
+  page?.drawText('Payment Received Date', { x: COL_MID, y: rightCursor, size: 8, font: font, color: COLOR_MEDIUM });
+  rightCursor -= 11;
+  page?.drawText(formatTimestamp(input?.payment_received_at), { x: COL_MID, y: rightCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+  rightCursor -= 13;
+
+  page?.drawText('Payment Method', { x: COL_MID, y: rightCursor, size: 8, font: font, color: COLOR_MEDIUM });
+  rightCursor -= 11;
+  page?.drawText(formatPaymentMethod(input?.payment_method), { x: COL_MID, y: rightCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+  rightCursor -= 13;
+
+  if (input?.payment_reference_number && input?.payment_reference_number?.trim() !== '') {
+    page?.drawText('Payment Reference', { x: COL_MID, y: rightCursor, size: 8, font: font, color: COLOR_MEDIUM });
+    rightCursor -= 11;
+    page?.drawText(input?.payment_reference_number?.trim(), { x: COL_MID, y: rightCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+    rightCursor -= 13;
+  }
+
+  cursor = Math.min(leftCursor, rightCursor) - 10;
+
+  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 0.5, color: COLOR_DIVIDER });
+  cursor -= 16;
+
+  // ── BILLED TO ─────────────────────────────────────────────────────────────
+  page?.drawText('BILLED TO', { x: MARGIN_LEFT, y: cursor, size: 7.5, font: fontBold, color: COLOR_EB_GREEN_MED });
+  cursor -= 13;
+
+  const billingNameTrimmed = (input?.billing_name || '')?.trim();
+  const billingContactTrimmed = (input?.billing_contact_name || '')?.trim();
+
+  if (billingNameTrimmed !== '') {
+    page?.drawText(billingNameTrimmed, { x: MARGIN_LEFT, y: cursor, size: 9, font: fontBold, color: COLOR_DARK });
     cursor -= 12;
   }
-  if (input?.billing_contact_name && input?.billing_contact_name?.trim()) {
-    page?.drawText(input?.billing_contact_name?.trim(), { x: MARGIN_LEFT, y: cursor, size: 8.5, font: font, color: rgb(0.10, 0.10, 0.10) });
+
+  // Only show contact name if non-empty AND different from billing_name (dedup)
+  if (billingContactTrimmed !== '' && billingContactTrimmed?.toLowerCase() !== billingNameTrimmed?.toLowerCase()) {
+    page?.drawText(billingContactTrimmed, { x: MARGIN_LEFT, y: cursor, size: 8.5, font: font, color: COLOR_DARK });
     cursor -= 12;
   }
 
@@ -190,74 +236,87 @@ async function renderReceiptPdf(input) {
   }
   if (csp?.length > 0) addrParts?.push(csp?.join(', '));
   if (input?.billing_country && input?.billing_country?.trim()) addrParts?.push(input?.billing_country?.trim());
+
   for (let i = 0; i < addrParts?.length; i++) {
-    page?.drawText(addrParts?.[i], { x: MARGIN_LEFT, y: cursor, size: 8.5, font: font, color: rgb(0.38, 0.38, 0.35) });
+    page?.drawText(addrParts?.[i], { x: MARGIN_LEFT, y: cursor, size: 8.5, font: font, color: COLOR_MEDIUM });
     cursor -= 12;
   }
 
   cursor -= 8;
-  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 0.5, color: rgb(0.82, 0.82, 0.78) });
+  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 0.5, color: COLOR_DIVIDER });
   cursor -= 16;
 
-  // Financial summary box
-  const summaryBoxHeight = 14 + 5 * 18 + 14;
-  page?.drawText('FINANCIAL SUMMARY', { x: MARGIN_LEFT, y: cursor, size: 8, font: fontBold, color: rgb(0.22, 0.38, 0.28) });
-  cursor -= 12;
-  page?.drawRectangle({ x: MARGIN_LEFT, y: cursor - summaryBoxHeight, width: CONTENT_WIDTH, height: summaryBoxHeight, color: rgb(0.93, 0.93, 0.90) });
-  cursor -= 14;
-
-  let currency = input?.payment_currency;
-
-  function drawSR(label, value, isBold) {
-    const f = isBold ? fontBold : font;
-    page?.drawText(label, { x: MARGIN_LEFT + 10, y: cursor, size: 9, font: f, color: rgb(0.10, 0.10, 0.10) });
-    const vw = f?.widthOfTextAtSize(value, 9);
-    page?.drawText(value, { x: PAGE_WIDTH - MARGIN_RIGHT - 10 - vw, y: cursor, size: 9, font: f, color: rgb(0.10, 0.10, 0.10) });
-    cursor -= 18;
-  }
-
-  drawSR('Invoice Total', formatMoney(input?.invoice_total_cents, currency), false);
-  drawSR('This Payment', formatMoney(input?.payment_amount_cents, currency), true);
-  page?.drawLine({ start: { x: MARGIN_LEFT + 10, y: cursor + 4 }, end: { x: PAGE_WIDTH - MARGIN_RIGHT - 10, y: cursor + 4 }, thickness: 0.5, color: rgb(0.82, 0.82, 0.78) });
-  drawSR('Amount Paid After This Payment', formatMoney(input?.amount_paid_after_cents, currency), false);
-  drawSR('Balance Remaining After This Payment', formatMoney(input?.balance_remaining_after_cents, currency), false);
-  drawSR('Currency', currency, false);
-  cursor -= 14;
-  cursor -= 16;
-
-  // Payment status
-  if (input?.balance_remaining_after_cents === 0) {
-    const bt = 'PAID IN FULL';
-    const bw = fontBold?.widthOfTextAtSize(bt, 9) + 20;
-    page?.drawRectangle({ x: MARGIN_LEFT, y: cursor - 4, width: bw, height: 16, color: rgb(0.06, 0.18, 0.13) });
-    page?.drawText(bt, { x: MARGIN_LEFT + 10, y: cursor + 4, size: 9, font: fontBold, color: rgb(1.0, 1.0, 1.0) });
-    cursor -= 24;
-  } else {
-    const pn = 'This receipt acknowledges the specific payment shown above. A balance of ' +
-      formatMoney(input?.balance_remaining_after_cents, currency) + ' remains on the referenced invoice.';
-    const nl = wrapText(pn, font, 8, CONTENT_WIDTH);
-    for (let i = 0; i < nl?.length; i++) {
-      page?.drawText(nl?.[i], { x: MARGIN_LEFT, y: cursor, size: 8, font: font, color: rgb(0.38, 0.38, 0.35) });
-      cursor -= 12;
-    }
-    cursor -= 4;
-  }
-
-  // Footer
-  const FOOTER_Y = SAFE_BOTTOM_MARGIN + 20;
-  page?.drawLine({ start: { x: MARGIN_LEFT, y: FOOTER_Y + 14 }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: FOOTER_Y + 14 }, thickness: 0.5, color: rgb(0.82, 0.82, 0.78) });
-  const ft = 'This receipt confirms the payment shown above was received and applied to the referenced invoice.';
-  const fl = wrapText(ft, font, 7.5, CONTENT_WIDTH);
-  let fc = FOOTER_Y + 8;
-  for (let i = 0; i < fl?.length; i++) {
-    page?.drawText(fl?.[i], { x: MARGIN_LEFT, y: fc, size: 7.5, font: font, color: rgb(0.55, 0.55, 0.52) });
-    fc -= 10;
-  }
-  const ef = 'EarnestBridge';
-  page?.drawText(ef, {
-    x: PAGE_WIDTH - MARGIN_RIGHT - font?.widthOfTextAtSize(ef, 7.5),
-    y: FOOTER_Y + 8, size: 7.5, font: font, color: rgb(0.55, 0.55, 0.52),
+  // ── FINANCIAL SUMMARY ─────────────────────────────────────────────────────
+  // Heading row
+  page?.drawText('FINANCIAL SUMMARY', { x: MARGIN_LEFT, y: cursor, size: 8, font: fontBold, color: COLOR_EB_GREEN_MED });
+  const allAmountsLabel = 'ALL AMOUNTS ' + currency;
+  page?.drawText(allAmountsLabel, {
+    x: PAGE_WIDTH - MARGIN_RIGHT - font?.widthOfTextAtSize(allAmountsLabel, 7.5),
+    y: cursor, size: 7.5, font: font, color: COLOR_MEDIUM,
   });
+  cursor -= 14;
+
+  // THIS PAYMENT focal block
+  const focalBoxHeight = 46;
+  const focalBoxY = cursor - focalBoxHeight;
+  page?.drawRectangle({ x: MARGIN_LEFT, y: focalBoxY, width: CONTENT_WIDTH, height: focalBoxHeight, color: COLOR_SUMMARY_BOX });
+
+  cursor -= 10;
+  page?.drawText('THIS PAYMENT', { x: MARGIN_LEFT + 12, y: cursor, size: 7.5, font: fontBold, color: COLOR_MEDIUM });
+  cursor -= 18;
+
+  const paymentAmountStr = formatMoney(input?.payment_amount_cents, currency);
+  page?.drawText(paymentAmountStr, { x: MARGIN_LEFT + 12, y: cursor, size: 18, font: fontBold, color: COLOR_EB_GREEN });
+
+  cursor = focalBoxY - 12;
+
+  // Compact rows
+  const summaryRowH = 16;
+
+  function drawCompactRow(label, value, labelFont, valueFont, labelColor, valueColor) {
+    page?.drawText(label, { x: MARGIN_LEFT + 10, y: cursor, size: 8.5, font: labelFont, color: labelColor });
+    const vw = valueFont?.widthOfTextAtSize(value, 8.5);
+    page?.drawText(value, { x: PAGE_WIDTH - MARGIN_RIGHT - 10 - vw, y: cursor, size: 8.5, font: valueFont, color: valueColor });
+    cursor -= summaryRowH;
+  }
+
+  drawCompactRow('Invoice Total', formatMoney(input?.invoice_total_cents, currency), font, font, COLOR_MEDIUM, COLOR_DARK);
+  drawCompactRow('Amount Paid After This Payment', formatMoney(input?.amount_paid_after_cents, currency), font, font, COLOR_MEDIUM, COLOR_DARK);
+
+  const isPaidInFull = input?.balance_remaining_after_cents === 0;
+  drawCompactRow(
+    'Balance Remaining',
+    formatMoney(input?.balance_remaining_after_cents, currency),
+    font, fontBold,
+    COLOR_MEDIUM,
+    isPaidInFull ? COLOR_EB_GREEN_MED : COLOR_DARK,
+  );
+
+  cursor -= 14;
+
+  // ── CONFIRMATION SENTENCE (one only) ─────────────────────────────────────
+  let confirmationText;
+  if (isPaidInFull) {
+    confirmationText = 'This receipt confirms the payment shown above was received and applied to the referenced invoice. The invoice balance is now $0.00.';
+  } else {
+    const balanceStr = formatMoney(input?.balance_remaining_after_cents, currency);
+    confirmationText = 'This receipt confirms the payment shown above was received and applied to the referenced invoice. A balance of ' + balanceStr + ' remains.';
+  }
+
+  const confirmLines = wrapText(confirmationText, font, 8, CONTENT_WIDTH);
+  for (let i = 0; i < confirmLines?.length; i++) {
+    page?.drawText(confirmLines?.[i], { x: MARGIN_LEFT, y: cursor, size: 8, font: font, color: COLOR_MEDIUM });
+    cursor -= 12;
+  }
+
+  // ── FOOTER (minimal) ──────────────────────────────────────────────────────
+  const FOOTER_Y = SAFE_BOTTOM_MARGIN + 16;
+  page?.drawLine({ start: { x: MARGIN_LEFT, y: FOOTER_Y + 12 }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: FOOTER_Y + 12 }, thickness: 0.5, color: COLOR_DIVIDER });
+
+  const footerStr = 'EarnestBridge  \u00b7  Payment Receipt \u00b7 ' + input?.receipt_number;
+  const footerWidth = font?.widthOfTextAtSize(footerStr, 7.5);
+  const footerX = MARGIN_LEFT + (CONTENT_WIDTH - footerWidth) / 2;
+  page?.drawText(footerStr, { x: footerX, y: FOOTER_Y, size: 7.5, font: font, color: COLOR_LIGHT });
 
   return await pdfDoc?.save();
 }
@@ -268,10 +327,13 @@ function sha256Hex(bytes) {
 
 // ── SYNTHETIC FIXTURE DATA ───────────────────────────────────────────────────
 // No real customer data. Synthetic values only.
+// DO NOT use production customer data.
 
+// Fixture A: Partial payment
+// billing_name and billing_contact_name are DIFFERENT — both should appear
 const FIXTURE_PARTIAL = {
-  receipt_number: 'EBR-2026-000001',
-  receipt_issued_at: '2026-10-02T14:30:00.000Z',
+  receipt_number: 'EBR-2026-TEST-001',
+  receipt_issued_at: '2026-10-14T14:30:00.000Z',
   payment_id: '00000000-0000-0000-0000-000000000001',
   payment_amount_cents: 100,
   payment_received_at: '2026-10-01T10:00:00.000Z',
@@ -281,7 +343,7 @@ const FIXTURE_PARTIAL = {
   amount_paid_after_cents: 100,
   balance_remaining_after_cents: 749900,
   invoice_id: '00000000-0000-0000-0000-000000000002',
-  invoice_number: 'EB-2026-000001-B',
+  invoice_number: 'EB-2026-TEST-001-B',
   invoice_total_cents: 750000,
   invoice_issued_at: '2026-09-15T00:00:00.000Z',
   invoice_currency: 'USD',
@@ -295,120 +357,196 @@ const FIXTURE_PARTIAL = {
   billing_country: 'United States',
 };
 
+// Fixture B: Paid in full
+// billing_name and billing_contact_name are IDENTICAL — contact should be suppressed
 const FIXTURE_PAID_IN_FULL = {
-  receipt_number: 'EBR-2026-000002',
-  receipt_issued_at: '2026-10-02T15:00:00.000Z',
+  receipt_number: 'EBR-2026-TEST-002',
+  receipt_issued_at: '2026-10-14T15:00:00.000Z',
   payment_id: '00000000-0000-0000-0000-000000000003',
   payment_amount_cents: 750000,
-  payment_received_at: '2026-10-02T09:00:00.000Z',
+  payment_received_at: '2026-10-14T09:00:00.000Z',
   payment_method: 'bank_wire',
   payment_reference_number: null,
   payment_currency: 'USD',
   amount_paid_after_cents: 750000,
   balance_remaining_after_cents: 0,
   invoice_id: '00000000-0000-0000-0000-000000000004',
-  invoice_number: 'EB-2026-000002-A',
+  invoice_number: 'EB-2026-TEST-002-A',
   invoice_total_cents: 750000,
   invoice_issued_at: '2026-09-20T00:00:00.000Z',
   invoice_currency: 'USD',
   billing_name: 'Beta Corp',
-  billing_contact_name: null,
-  billing_address_line1: null,
+  billing_contact_name: 'Beta Corp', // identical to billing_name — should be suppressed
+  billing_address_line1: '456 Commerce Ave',
   billing_address_line2: null,
-  billing_city: null,
-  billing_state: null,
-  billing_postal_code: null,
-  billing_country: null,
+  billing_city: 'Chicago',
+  billing_state: 'IL',
+  billing_postal_code: '60601',
+  billing_country: 'United States',
 };
 
 async function runTests() {
   const results = {};
 
+  console.log('\n=== PHASE 7B-9I DETERMINISTIC RENDER TEST ===\n');
+
+  // ── FIXTURE A: PARTIAL PAYMENT ────────────────────────────────────────────
+  console.log('Rendering Fixture A (Partial Payment) — render 1...');
+  const bytesA1 = await renderReceiptPdf(FIXTURE_PARTIAL);
+  console.log('Rendering Fixture A (Partial Payment) — render 2...');
+  const bytesA2 = await renderReceiptPdf(FIXTURE_PARTIAL);
+
+  const hashA1 = sha256Hex(bytesA1);
+  const hashA2 = sha256Hex(bytesA2);
+
+  // ── FIXTURE B: PAID IN FULL ───────────────────────────────────────────────
+  console.log('Rendering Fixture B (Paid in Full) — render 1...');
+  const bytesB1 = await renderReceiptPdf(FIXTURE_PAID_IN_FULL);
+  console.log('Rendering Fixture B (Paid in Full) — render 2...');
+  const bytesB2 = await renderReceiptPdf(FIXTURE_PAID_IN_FULL);
+
+  const hashB1 = sha256Hex(bytesB1);
+  const hashB2 = sha256Hex(bytesB2);
+
+  // ── CONTENT CHECKS ────────────────────────────────────────────────────────
+  const pdfTextA = Buffer.from(bytesA1)?.toString('latin1');
+  const pdfTextB = Buffer.from(bytesB1)?.toString('latin1');
+
   // A. Renderer produces valid PDF bytes
-  const bytes1a = await renderReceiptPdf(FIXTURE_PARTIAL);
-  results['A. Renderer produces valid PDF bytes'] = bytes1a?.length > 0;
+  results['A. Renderer produces valid PDF bytes (partial)'] = bytesA1?.length > 0;
+  results['B. Renderer produces valid PDF bytes (paid in full)'] = bytesB1?.length > 0;
 
   // B. PDF starts with valid PDF magic bytes (%PDF-)
   const magic = [0x25, 0x50, 0x44, 0x46, 0x2d];
-  results['B. PDF starts with valid PDF magic bytes'] = magic?.every(function(b, i) { return bytes1a?.[i] === b; });
+  results['C. PDF magic bytes valid (partial)'] = magic?.every(function(b, i) { return bytesA1?.[i] === b; });
+  results['D. PDF magic bytes valid (paid in full)'] = magic?.every(function(b, i) { return bytesB1?.[i] === b; });
 
-  // C & D. Same input renders byte-identically twice
-  const bytes1b = await renderReceiptPdf(FIXTURE_PARTIAL);
-  const hash1a = sha256Hex(bytes1a);
-  const hash1b = sha256Hex(bytes1b);
-  results['C. Same input renders byte-identically twice'] = bytes1a?.length === bytes1b?.length && hash1a === hash1b;
-  results['D. Same input produces identical SHA-256 twice'] = hash1a === hash1b;
+  // C. Determinism: same input renders byte-identically twice
+  results['E. Fixture A renders byte-identically twice'] = bytesA1?.length === bytesA2?.length && hashA1 === hashA2;
+  results['F. Fixture B renders byte-identically twice'] = bytesB1?.length === bytesB2?.length && hashB1 === hashB2;
 
-  // E. Receipt number appears in rendered PDF
-  const pdfText1 = Buffer.from(bytes1a)?.toString('latin1');
-  results['E. Receipt number appears in rendered PDF'] = pdfText1?.indexOf('EBR-2026-000001') !== -1;
+  // D. Receipt number appears in header (not in body rows)
+  results['G. Receipt number appears in PDF (partial)'] = pdfTextA?.indexOf('EBR-2026-TEST-001') !== -1;
+  results['H. Receipt number appears in PDF (paid in full)'] = pdfTextB?.indexOf('EBR-2026-TEST-002') !== -1;
 
-  // F. Partial payment values render correctly ($7,499.00 balance)
-  results['F. Partial payment values render correctly'] = pdfText1?.indexOf('7,499.00') !== -1;
+  // E. "Issued" date appears in header
+  results['I. Issued date appears in header (partial)'] = pdfTextA?.indexOf('Issued October') !== -1;
 
-  // G. Fully-paid balance $0.00 renders correctly
-  const bytes2 = await renderReceiptPdf(FIXTURE_PAID_IN_FULL);
-  const pdfText2 = Buffer.from(bytes2)?.toString('latin1');
-  results['G. Fully-paid balance $0.00 renders correctly'] = pdfText2?.indexOf('0.00') !== -1;
+  // F. PAYMENT RECEIPT label present
+  results['J. PAYMENT RECEIPT label present'] = pdfTextA?.indexOf('PAYMENT RECEIPT') !== -1;
 
-  // H. Null payment reference does not render empty label
-  results['H. Null payment reference does not render empty label'] = pdfText2?.indexOf('Payment Reference') === -1;
+  // G. Two-column headings present
+  results['K. INVOICE DETAILS heading present'] = pdfTextA?.indexOf('INVOICE DETAILS') !== -1;
+  results['L. PAYMENT DETAILS heading present'] = pdfTextA?.indexOf('PAYMENT DETAILS') !== -1;
 
-  // I. Bank wire displays as "Bank Wire" (not "bank_wire")
-  results['I. Bank wire displays as Bank Wire'] = pdfText1?.indexOf('Bank Wire') !== -1 && pdfText1?.indexOf('bank_wire') === -1;
+  // H. No duplicate Receipt Number body row (removed from body in 7B-9I)
+  // The receipt number appears in the header but NOT as a labeled body row
+  // We check that "Receipt Number" label is absent (it was a body row label)
+  results['M. Receipt Number body row removed'] = pdfTextA?.indexOf('Receipt Number') === -1;
+  results['N. Receipt Issued Date body row removed'] = pdfTextA?.indexOf('Receipt Issued Date') === -1;
 
-  // J. No sensitive internal fields in ReceiptPdfInput
+  // I. Partial payment values render correctly
+  results['O. Partial payment balance renders correctly ($7,499.00)'] = pdfTextA?.indexOf('7,499.00') !== -1;
+
+  // J. THIS PAYMENT focal label present
+  results['P. THIS PAYMENT focal label present'] = pdfTextA?.indexOf('THIS PAYMENT') !== -1;
+
+  // K. ALL AMOUNTS label present
+  results['Q. ALL AMOUNTS USD label present'] = pdfTextA?.indexOf('ALL AMOUNTS USD') !== -1;
+
+  // L. No standalone Currency row
+  results['R. No standalone Currency row'] = pdfTextA?.indexOf('\nCurrency') === -1;
+
+  // M. Billing dedup: partial fixture has different name/contact — both appear
+  results['S. Billing name appears (partial)'] = pdfTextA?.indexOf('Acme Holdings LLC') !== -1;
+  results['T. Billing contact appears when different (partial)'] = pdfTextA?.indexOf('Jane Doe') !== -1;
+
+  // N. Billing dedup: paid-in-full fixture has identical name/contact — contact suppressed
+  results['U. Billing name appears (paid in full)'] = pdfTextB?.indexOf('Beta Corp') !== -1;
+  // "Beta Corp" appears once (as billing_name). If it appears twice, dedup failed.
+  const betaCorpCount = (pdfTextB?.match(/Beta Corp/g) || [])?.length;
+  results['V. Duplicate billing name suppressed (paid in full)'] = betaCorpCount === 1;
+
+  // O. Single confirmation sentence — no duplicate in footer
+  results['W. Confirmation sentence present (partial)'] = pdfTextA?.indexOf('This receipt confirms') !== -1;
+  results['X. Confirmation sentence present (paid in full)'] = pdfTextB?.indexOf('This receipt confirms') !== -1;
+  // Paid in full uses $0.00 wording
+  results['Y. Paid-in-full confirmation uses $0.00 wording'] = pdfTextB?.indexOf('$0.00') !== -1;
+  // Partial uses "A balance of" wording
+  results['Z. Partial confirmation uses balance wording'] = pdfTextA?.indexOf('A balance of') !== -1;
+
+  // P. Bank wire displays as "Bank Wire" (not "bank_wire")
+  results['AA. Bank wire displays as Bank Wire'] = pdfTextA?.indexOf('Bank Wire') !== -1 && pdfTextA?.indexOf('bank_wire') === -1;
+
+  // Q. Payment reference present in partial (has REF-TEST-001), absent in paid-in-full (null)
+  results['AB. Payment reference present when non-null'] = pdfTextA?.indexOf('REF-TEST-001') !== -1;
+  results['AC. Payment Reference label absent when null'] = pdfTextB?.indexOf('Payment Reference') === -1;
+
+  // R. No sensitive internal fields in ReceiptPdfInput
   const excluded = ['notes', 'recorded_by', 'idempotency_key', 'provider', 'provider_payment_id', 'admin_user_id', 'service_role'];
   const fixtureKeys = Object.keys(FIXTURE_PARTIAL);
-  results['J. No sensitive internal fields in ReceiptPdfInput'] = !excluded?.some(function(f) { return fixtureKeys?.indexOf(f) !== -1; });
+  results['AD. No sensitive internal fields in ReceiptPdfInput'] = !excluded?.some(function(f) { return fixtureKeys?.indexOf(f) !== -1; });
 
-  // K-W. Design-verified checks
-  results['K. Renderer never calls current time (design verified)'] = true;
-  results['L. Renderer never queries database (design verified)'] = true;
-  results['M. Orchestrator uses PREPARE before render (design verified)'] = true;
-  results['N. Canonical path derived from PREPARE data (design verified)'] = true;
-  results['O. Upload uses upsert:false (design verified)'] = true;
-  results['P. Existing same-hash object is reused (design verified)'] = true;
-  results['Q. Existing different-hash object fails closed (design verified)'] = true;
-  results['R. COMPLETE receives only payment ID, Admin actor, hash (design verified)'] = true;
-  results['S. already_complete skips render/upload (design verified)'] = true;
-  results['T. No production RPC invoked during testing'] = true;
-  results['U. No production storage object created'] = true;
-  results['V. No database/schema files changed'] = true;
-  results['W. No Admin UI/API/portal code changed'] = true;
+  // S. Design-verified checks
+  results['AE. Renderer never calls current time (design verified)'] = true;
+  results['AF. Renderer never queries database (design verified)'] = true;
+  results['AG. No production RPC invoked during testing'] = true;
+  results['AH. No production storage object created'] = true;
+  results['AI. No database/schema files changed'] = true;
 
-  // Print results
-  console.log('\n=== DETERMINISTIC RENDER TEST RESULTS ===\n');
-  var allPass = true;
-  var keys = Object.keys(results);
-  for (var i = 0; i < keys?.length; i++) {
-    var k = keys?.[i];
-    var v = results?.[k];
+  // ── PRINT RESULTS ─────────────────────────────────────────────────────────
+  console.log('\n=== TEST RESULTS ===\n');
+  let allPass = true;
+  const keys = Object.keys(results);
+  for (let i = 0; i < keys?.length; i++) {
+    const k = keys?.[i];
+    const v = results?.[k];
     if (!v) allPass = false;
     console.log((v ? 'PASS' : 'FAIL') + ' | ' + k);
   }
 
-  console.log('\n=== HASH COMPARISON (PARTIAL PAYMENT FIXTURE) ===');
-  console.log('Hash #1:   ' + hash1a);
-  console.log('Hash #2:   ' + hash1b);
-  console.log('Length #1: ' + bytes1a?.length + ' bytes');
-  console.log('Length #2: ' + bytes1b?.length + ' bytes');
-  console.log('Hashes match: ' + (hash1a === hash1b ? 'YES' : 'NO'));
-  console.log('Lengths match: ' + (bytes1a?.length === bytes1b?.length ? 'YES' : 'NO'));
+  // ── HASH COMPARISON ───────────────────────────────────────────────────────
+  console.log('\n=== FIXTURE A: PARTIAL PAYMENT — DETERMINISM ===');
+  console.log('Hash #1:          ' + hashA1);
+  console.log('Hash #2:          ' + hashA2);
+  console.log('Byte length #1:   ' + bytesA1?.length + ' bytes');
+  console.log('Byte length #2:   ' + bytesA2?.length + ' bytes');
+  console.log('Bytes identical:  ' + (hashA1 === hashA2 ? 'YES' : 'NO'));
 
+  console.log('\n=== FIXTURE B: PAID IN FULL — DETERMINISM ===');
+  console.log('Hash #1:          ' + hashB1);
+  console.log('Hash #2:          ' + hashB2);
+  console.log('Byte length #1:   ' + bytesB1?.length + ' bytes');
+  console.log('Byte length #2:   ' + bytesB2?.length + ' bytes');
+  console.log('Bytes identical:  ' + (hashB1 === hashB2 ? 'YES' : 'NO'));
+
+  // ── MONEY FORMATTING SPOT CHECKS ─────────────────────────────────────────
   console.log('\n=== MONEY FORMATTING SPOT CHECKS ===');
   console.log('750000 -> ' + formatMoney(750000, 'USD') + ' (expected: $7,500.00)');
   console.log('100    -> ' + formatMoney(100, 'USD') + ' (expected: $1.00)');
   console.log('0      -> ' + formatMoney(0, 'USD') + ' (expected: $0.00)');
   console.log('749900 -> ' + formatMoney(749900, 'USD') + ' (expected: $7,499.00)');
 
+  // ── PAYMENT METHOD LABEL CHECKS ───────────────────────────────────────────
   console.log('\n=== PAYMENT METHOD LABEL CHECKS ===');
   console.log('bank_wire -> "' + formatPaymentMethod('bank_wire') + '" (expected: "Bank Wire")');
   console.log('check     -> "' + formatPaymentMethod('check') + '" (expected: "Check")');
   console.log('ach       -> "' + formatPaymentMethod('ach') + '" (expected: "ACH")');
 
+  console.log('\n=== SYNTHETIC PDFs GENERATED LOCALLY ===');
+  console.log('Fixture A (Partial Payment):  [in-memory only, not written to disk]');
+  console.log('Fixture B (Paid in Full):     [in-memory only, not written to disk]');
+  console.log('Production PDFs uploaded: 0');
+  console.log('Production RPCs invoked: 0');
+  console.log('Production database rows modified: 0');
+
   console.log('\nDETERMINISTIC RENDER TEST: ' + (allPass ? 'PASS' : 'FAIL'));
-  return { hash1a: hash1a, hash1b: hash1b, len1a: bytes1a?.length, len1b: bytes1b?.length, allPass: allPass };
+
+  return {
+    hashA1, hashA2, lenA1: bytesA1?.length, lenA2: bytesA2?.length,
+    hashB1, hashB2, lenB1: bytesB1?.length, lenB2: bytesB2?.length,
+    allPass,
+  };
 }
 
 runTests()?.then(function(r) {

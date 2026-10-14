@@ -566,13 +566,16 @@ export async function generateReceiptPdf(
   }
 
   // Return safe completion data only
+  // payment_id and invoice_id come from prepareData (authoritative source).
+  // generated_at comes from the COMPLETE RPC response.
+  // Do not trust caller-supplied IDs.
   return {
     success: true,
     already_complete: completeData.already_complete === true,
     receipt_number: completeData.receipt_number,
     receipt_issued_at: completeData.receipt_issued_at,
     generated_at: completeData.receipt_pdf_generated_at ?? null,
-    payment_id: completeData.payment_id,
-    invoice_id: completeData.invoice_id,
+    payment_id: prepareData.payment_id,
+    invoice_id: prepareData.invoice_id,
   };
 }
