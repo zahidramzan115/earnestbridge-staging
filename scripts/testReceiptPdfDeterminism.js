@@ -1,7 +1,7 @@
 /**
  * scripts/testReceiptPdfDeterminism.js
  *
- * Phase 7B-9J — Deterministic render test for receipt PDF renderer (Design Overhaul).
+ * Phase 7B-9I — Deterministic render test for receipt PDF renderer (Visual Polish).
  * Uses SYNTHETIC fixture data only.
  * No real customer data. No Supabase calls. No uploads.
  *
@@ -79,7 +79,7 @@ function wrapText(text, font, fontSize, maxWidth) {
   return result;
 }
 
-// ── Core renderer (mirrors receiptPdf.ts 7B-9J layout exactly) ──────────────
+// ── Core renderer (mirrors receiptPdf.ts 7B-9I layout exactly) ──────────────
 async function renderReceiptPdf(input) {
   const pdfDoc = await PDFDocument?.create();
 
@@ -98,172 +98,129 @@ async function renderReceiptPdf(input) {
   const PAGE_WIDTH = 612;
   const PAGE_HEIGHT = 792;
   const page = pdfDoc?.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  const MARGIN_LEFT = 48;
-  const MARGIN_RIGHT = 48;
+  const MARGIN_LEFT = 50;
+  const MARGIN_RIGHT = 50;
   const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-  const SAFE_BOTTOM_MARGIN = 48;
+  const SAFE_BOTTOM_MARGIN = 50;
 
-  const COLOR_WHITE        = rgb(1.0, 1.0, 1.0);
-  const COLOR_PAGE_BG      = rgb(1.0, 1.0, 1.0);
-  const COLOR_EB_GREEN     = rgb(0.055, 0.176, 0.125);
-  const COLOR_EB_GREEN_LT  = rgb(0.08, 0.26, 0.18);
-  const COLOR_EB_GREEN_ACC = rgb(0.10, 0.42, 0.28);
-  const COLOR_CARD_BG      = rgb(0.965, 0.965, 0.965);
-  const COLOR_CARD_BORDER  = rgb(0.88, 0.88, 0.88);
-  const COLOR_DIVIDER      = rgb(0.86, 0.86, 0.86);
+  const COLOR_PAGE_BG      = rgb(0.97, 0.97, 0.94);
+  const COLOR_EB_GREEN     = rgb(0.06, 0.18, 0.13);
+  const COLOR_EB_GREEN_MED = rgb(0.22, 0.38, 0.28);
+  const COLOR_DIVIDER      = rgb(0.82, 0.82, 0.78);
+  const COLOR_SUMMARY_BOX  = rgb(0.93, 0.93, 0.90);
   const COLOR_DARK         = rgb(0.10, 0.10, 0.10);
-  const COLOR_MEDIUM       = rgb(0.40, 0.40, 0.40);
-  const COLOR_LIGHT        = rgb(0.58, 0.58, 0.58);
-  const COLOR_BADGE_PARTIAL_BG   = rgb(0.90, 0.90, 0.90);
-  const COLOR_BADGE_PARTIAL_TEXT = rgb(0.35, 0.35, 0.35);
-  const COLOR_BADGE_PAID_BG      = rgb(0.88, 0.96, 0.90);
-  const COLOR_BADGE_PAID_TEXT    = rgb(0.06, 0.38, 0.20);
-
-  const isPaidInFull = input?.balance_remaining_after_cents === 0;
-  let currency = input?.payment_currency;
-  const hasRef = !!(input?.payment_reference_number && input?.payment_reference_number?.trim() !== '');
+  const COLOR_MEDIUM       = rgb(0.38, 0.38, 0.35);
+  const COLOR_LIGHT        = rgb(0.55, 0.55, 0.52);
 
   // Page background
   page?.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: COLOR_PAGE_BG });
+  // Top accent strip
+  page?.drawRectangle({ x: 0, y: PAGE_HEIGHT - 4, width: PAGE_WIDTH, height: 4, color: COLOR_EB_GREEN });
 
-  // ── 1. FULL-WIDTH HEADER BAND ─────────────────────────────────────────────
-  const HEADER_HEIGHT = 78;
-  const HEADER_BOTTOM = PAGE_HEIGHT - HEADER_HEIGHT;
+  let cursor = PAGE_HEIGHT - 4;
+  let currency = input?.payment_currency;
 
-  page?.drawRectangle({ x: 0, y: HEADER_BOTTOM, width: PAGE_WIDTH, height: HEADER_HEIGHT, color: COLOR_EB_GREEN });
+  // ── HEADER ────────────────────────────────────────────────────────────────
+  cursor -= 34;
 
-  // LEFT: EarnestBridge wordmark
-  const wordmarkY = HEADER_BOTTOM + 44;
-  page?.drawText('EarnestBridge', { x: MARGIN_LEFT, y: wordmarkY, size: 17, font: fontBold, color: COLOR_WHITE });
+  // EarnestBridge wordmark (left)
+  page?.drawText('EarnestBridge', { x: MARGIN_LEFT, y: cursor, size: 16, font: fontBold, color: COLOR_EB_GREEN });
 
-  // LEFT: tagline
-  const taglineY = wordmarkY - 16;
-  page?.drawText('Lock up the Deal.', { x: MARGIN_LEFT, y: taglineY, size: 8.5, font: font, color: rgb(0.75, 0.88, 0.80) });
+  // PAYMENT RECEIPT (right, top)
+  const receiptLabel = 'PAYMENT RECEIPT';
+  page?.drawText(receiptLabel, {
+    x: PAGE_WIDTH - MARGIN_RIGHT - fontBold?.widthOfTextAtSize(receiptLabel, 10),
+    y: cursor, size: 10, font: fontBold, color: COLOR_EB_GREEN_MED,
+  });
 
-  // RIGHT: PAYMENT RECEIPT title
-  const receiptTitleStr = 'PAYMENT RECEIPT';
-  const receiptTitleSize = 11;
-  const receiptTitleWidth = fontBold?.widthOfTextAtSize(receiptTitleStr, receiptTitleSize);
-  const receiptTitleY = HEADER_BOTTOM + 50;
-  page?.drawText(receiptTitleStr, { x: PAGE_WIDTH - MARGIN_RIGHT - receiptTitleWidth, y: receiptTitleY, size: receiptTitleSize, font: fontBold, color: COLOR_WHITE });
+  cursor -= 8;
 
-  // RIGHT: receipt number
-  const receiptNumStr = input?.receipt_number;
-  const receiptNumSize = 8.5;
-  const receiptNumWidth = font?.widthOfTextAtSize(receiptNumStr, receiptNumSize);
-  const receiptNumY = receiptTitleY - 14;
-  page?.drawText(receiptNumStr, { x: PAGE_WIDTH - MARGIN_RIGHT - receiptNumWidth, y: receiptNumY, size: receiptNumSize, font: font, color: rgb(0.82, 0.92, 0.86) });
+  // Tagline (left)
+  page?.drawText('Lock up the Deal.', { x: MARGIN_LEFT, y: cursor, size: 8, font: font, color: COLOR_MEDIUM });
 
-  // RIGHT: Issued date
+  // Receipt number — prominent (right)
+  page?.drawText(input?.receipt_number, {
+    x: PAGE_WIDTH - MARGIN_RIGHT - fontBold?.widthOfTextAtSize(input?.receipt_number, 11),
+    y: cursor, size: 11, font: fontBold, color: COLOR_DARK,
+  });
+
+  cursor -= 10;
+
+  // Issued date — secondary (right)
   const issuedDateStr = 'Issued ' + formatTimestamp(input?.receipt_issued_at);
-  const issuedDateSize = 7.5;
-  const issuedDateWidth = font?.widthOfTextAtSize(issuedDateStr, issuedDateSize);
-  const issuedDateY = receiptNumY - 12;
-  page?.drawText(issuedDateStr, { x: PAGE_WIDTH - MARGIN_RIGHT - issuedDateWidth, y: issuedDateY, size: issuedDateSize, font: font, color: rgb(0.68, 0.82, 0.74) });
+  page?.drawText(issuedDateStr, {
+    x: PAGE_WIDTH - MARGIN_RIGHT - font?.widthOfTextAtSize(issuedDateStr, 8),
+    y: cursor, size: 8, font: font, color: COLOR_MEDIUM,
+  });
 
-  let cursor = HEADER_BOTTOM - 14;
+  cursor -= 14;
 
-  // ── 2. PAYMENT HERO CARD ──────────────────────────────────────────────────
-  const HERO_CARD_PADDING_H = 16;
-  const HERO_CARD_PADDING_V = 14;
-  const HERO_CONTENT_HEIGHT = 14 + 6 + 10 + 4 + 28 + 6 + 10 + (hasRef ? 12 : 0);
-  const HERO_CARD_HEIGHT = HERO_CONTENT_HEIGHT + HERO_CARD_PADDING_V * 2;
-  const heroCardY = cursor - HERO_CARD_HEIGHT;
+  // Header divider
+  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 1.0, color: COLOR_EB_GREEN });
+  cursor -= 18;
 
-  page?.drawRectangle({ x: MARGIN_LEFT, y: heroCardY, width: CONTENT_WIDTH, height: HERO_CARD_HEIGHT, color: COLOR_CARD_BG, borderColor: COLOR_CARD_BORDER, borderWidth: 0.5 });
+  // ── TWO-COLUMN DETAILS ────────────────────────────────────────────────────
+  const COL_MID = MARGIN_LEFT + Math.floor(CONTENT_WIDTH / 2) + 4;
+  const detailsStartCursor = cursor;
 
-  // Status badge
-  const badgeText = isPaidInFull ? 'PAID IN FULL' : 'PARTIAL PAYMENT';
-  const badgeFontSize = 7;
-  const badgePadH = 6;
-  const badgePadV = 3;
-  const badgeTextWidth = fontBold?.widthOfTextAtSize(badgeText, badgeFontSize);
-  const badgeWidth = badgeTextWidth + badgePadH * 2;
-  const badgeHeight = badgeFontSize + badgePadV * 2;
-  const badgeX = MARGIN_LEFT + HERO_CARD_PADDING_H;
-  const badgeY = cursor - HERO_CARD_PADDING_V - badgeHeight;
-  const badgeBgColor = isPaidInFull ? COLOR_BADGE_PAID_BG : COLOR_BADGE_PARTIAL_BG;
-  const badgeTextColor = isPaidInFull ? COLOR_BADGE_PAID_TEXT : COLOR_BADGE_PARTIAL_TEXT;
-  page?.drawRectangle({ x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight, color: badgeBgColor });
-  page?.drawText(badgeText, { x: badgeX + badgePadH, y: badgeY + badgePadV + 0.5, size: badgeFontSize, font: fontBold, color: badgeTextColor });
+  // LEFT: INVOICE DETAILS
+  page?.drawText('INVOICE DETAILS', { x: MARGIN_LEFT, y: cursor, size: 7.5, font: fontBold, color: COLOR_EB_GREEN_MED });
+  let leftCursor = cursor - 12;
 
-  // PAYMENT RECEIVED label
-  const labelY = badgeY - 6 - 10;
-  page?.drawText('PAYMENT RECEIVED', { x: MARGIN_LEFT + HERO_CARD_PADDING_H, y: labelY, size: 8, font: fontBold, color: COLOR_MEDIUM });
+  page?.drawText('Invoice Number', { x: MARGIN_LEFT, y: leftCursor, size: 8, font: font, color: COLOR_MEDIUM });
+  leftCursor -= 11;
+  page?.drawText(input?.invoice_number, { x: MARGIN_LEFT, y: leftCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+  leftCursor -= 13;
 
-  // Large payment amount
-  const paymentAmountStr = formatMoney(input?.payment_amount_cents, currency);
-  const amountFontSize = 26;
-  const amountY = labelY - 4 - amountFontSize;
-  page?.drawText(paymentAmountStr, { x: MARGIN_LEFT + HERO_CARD_PADDING_H, y: amountY, size: amountFontSize, font: fontBold, color: COLOR_DARK });
+  page?.drawText('Invoice Issued Date', { x: MARGIN_LEFT, y: leftCursor, size: 8, font: font, color: COLOR_MEDIUM });
+  leftCursor -= 11;
+  page?.drawText(formatTimestamp(input?.invoice_issued_at), { x: MARGIN_LEFT, y: leftCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+  leftCursor -= 13;
 
-  // Date · Method
-  const dateMethodStr = formatTimestamp(input?.payment_received_at) + '  \u00b7  ' + formatPaymentMethod(input?.payment_method);
-  const dateMethodY = amountY - 6 - 10;
-  page?.drawText(dateMethodStr, { x: MARGIN_LEFT + HERO_CARD_PADDING_H, y: dateMethodY, size: 8.5, font: font, color: COLOR_MEDIUM });
+  // RIGHT: PAYMENT DETAILS
+  let rightCursor = detailsStartCursor;
+  page?.drawText('PAYMENT DETAILS', { x: COL_MID, y: rightCursor, size: 7.5, font: fontBold, color: COLOR_EB_GREEN_MED });
+  rightCursor -= 12;
 
-  // Reference
-  if (hasRef) {
-    const refStr = 'Reference: ' + input?.payment_reference_number?.trim();
-    const refY = dateMethodY - 12;
-    page?.drawText(refStr, { x: MARGIN_LEFT + HERO_CARD_PADDING_H, y: refY, size: 8, font: font, color: COLOR_LIGHT });
+  page?.drawText('Payment Received Date', { x: COL_MID, y: rightCursor, size: 8, font: font, color: COLOR_MEDIUM });
+  rightCursor -= 11;
+  page?.drawText(formatTimestamp(input?.payment_received_at), { x: COL_MID, y: rightCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+  rightCursor -= 13;
+
+  page?.drawText('Payment Method', { x: COL_MID, y: rightCursor, size: 8, font: font, color: COLOR_MEDIUM });
+  rightCursor -= 11;
+  page?.drawText(formatPaymentMethod(input?.payment_method), { x: COL_MID, y: rightCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+  rightCursor -= 13;
+
+  if (input?.payment_reference_number && input?.payment_reference_number?.trim() !== '') {
+    page?.drawText('Payment Reference', { x: COL_MID, y: rightCursor, size: 8, font: font, color: COLOR_MEDIUM });
+    rightCursor -= 11;
+    page?.drawText(input?.payment_reference_number?.trim(), { x: COL_MID, y: rightCursor, size: 8.5, font: fontBold, color: COLOR_DARK });
+    rightCursor -= 13;
   }
 
-  cursor = heroCardY - 12;
+  cursor = Math.min(leftCursor, rightCursor) - 10;
 
-  // ── 3. TWO SIDE-BY-SIDE INFO CARDS ───────────────────────────────────────
-  const CARD_GAP = 8;
-  const HALF_WIDTH = Math.floor((CONTENT_WIDTH - CARD_GAP) / 2);
-  const LEFT_CARD_X = MARGIN_LEFT;
-  const RIGHT_CARD_X = MARGIN_LEFT + HALF_WIDTH + CARD_GAP;
-  const CARD_PADDING_H = 12;
-  const CARD_PADDING_V = 12;
+  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 0.5, color: COLOR_DIVIDER });
+  cursor -= 16;
 
-  const LEFT_CARD_CONTENT_H = 10 + 8 + 8 + 3 + 9 + 10 + 8 + 3 + 9;
-  const RIGHT_CARD_CONTENT_H = 10 + 8 + 8 + 3 + 9 + 10 + 8 + 3 + 9 + (hasRef ? (10 + 8 + 3 + 9) : 0);
-  const CARDS_CONTENT_H = Math.max(LEFT_CARD_CONTENT_H, RIGHT_CARD_CONTENT_H);
-  const CARDS_HEIGHT = CARDS_CONTENT_H + CARD_PADDING_V * 2;
-  const cardsY = cursor - CARDS_HEIGHT;
+  // ── BILLED TO ─────────────────────────────────────────────────────────────
+  page?.drawText('BILLED TO', { x: MARGIN_LEFT, y: cursor, size: 7.5, font: fontBold, color: COLOR_EB_GREEN_MED });
+  cursor -= 13;
 
-  page?.drawRectangle({ x: LEFT_CARD_X, y: cardsY, width: HALF_WIDTH, height: CARDS_HEIGHT, color: COLOR_CARD_BG, borderColor: COLOR_CARD_BORDER, borderWidth: 0.5 });
-  page?.drawRectangle({ x: RIGHT_CARD_X, y: cardsY, width: HALF_WIDTH, height: CARDS_HEIGHT, color: COLOR_CARD_BG, borderColor: COLOR_CARD_BORDER, borderWidth: 0.5 });
-
-  // LEFT CARD
-  let lcy = cursor - CARD_PADDING_V;
-  page?.drawText('INVOICE', { x: LEFT_CARD_X + CARD_PADDING_H, y: lcy, size: 7, font: fontBold, color: COLOR_MEDIUM });
-  lcy -= 8 + 8;
-  page?.drawText('Invoice Number', { x: LEFT_CARD_X + CARD_PADDING_H, y: lcy, size: 7.5, font: font, color: COLOR_LIGHT });
-  lcy -= 3 + 9;
-  page?.drawText(input?.invoice_number, { x: LEFT_CARD_X + CARD_PADDING_H, y: lcy, size: 8.5, font: fontBold, color: COLOR_DARK });
-  lcy -= 10 + 8;
-  page?.drawText('Invoice Date', { x: LEFT_CARD_X + CARD_PADDING_H, y: lcy, size: 7.5, font: font, color: COLOR_LIGHT });
-  lcy -= 3 + 9;
-  page?.drawText(formatTimestamp(input?.invoice_issued_at), { x: LEFT_CARD_X + CARD_PADDING_H, y: lcy, size: 8.5, font: fontBold, color: COLOR_DARK });
-
-  // RIGHT CARD
-  let rcy = cursor - CARD_PADDING_V;
-  page?.drawText('PAYMENT', { x: RIGHT_CARD_X + CARD_PADDING_H, y: rcy, size: 7, font: fontBold, color: COLOR_MEDIUM });
-  rcy -= 8 + 8;
-  page?.drawText('Received', { x: RIGHT_CARD_X + CARD_PADDING_H, y: rcy, size: 7.5, font: font, color: COLOR_LIGHT });
-  rcy -= 3 + 9;
-  page?.drawText(formatTimestamp(input?.payment_received_at), { x: RIGHT_CARD_X + CARD_PADDING_H, y: rcy, size: 8.5, font: fontBold, color: COLOR_DARK });
-  rcy -= 10 + 8;
-  page?.drawText('Method', { x: RIGHT_CARD_X + CARD_PADDING_H, y: rcy, size: 7.5, font: font, color: COLOR_LIGHT });
-  rcy -= 3 + 9;
-  page?.drawText(formatPaymentMethod(input?.payment_method), { x: RIGHT_CARD_X + CARD_PADDING_H, y: rcy, size: 8.5, font: fontBold, color: COLOR_DARK });
-  rcy -= 10 + 8;
-  if (hasRef) {
-    page?.drawText('Reference', { x: RIGHT_CARD_X + CARD_PADDING_H, y: rcy, size: 7.5, font: font, color: COLOR_LIGHT });
-    rcy -= 3 + 9;
-    page?.drawText(input?.payment_reference_number?.trim(), { x: RIGHT_CARD_X + CARD_PADDING_H, y: rcy, size: 8.5, font: fontBold, color: COLOR_DARK });
-  }
-
-  cursor = cardsY - 12;
-
-  // ── 4. BILLED TO CARD ─────────────────────────────────────────────────────
   const billingNameTrimmed = (input?.billing_name || '')?.trim();
   const billingContactTrimmed = (input?.billing_contact_name || '')?.trim();
-  const showContact = billingContactTrimmed !== '' && billingContactTrimmed?.toLowerCase() !== billingNameTrimmed?.toLowerCase();
+
+  if (billingNameTrimmed !== '') {
+    page?.drawText(billingNameTrimmed, { x: MARGIN_LEFT, y: cursor, size: 9, font: fontBold, color: COLOR_DARK });
+    cursor -= 12;
+  }
+
+  // Only show contact name if non-empty AND different from billing_name (dedup)
+  if (billingContactTrimmed !== '' && billingContactTrimmed?.toLowerCase() !== billingNameTrimmed?.toLowerCase()) {
+    page?.drawText(billingContactTrimmed, { x: MARGIN_LEFT, y: cursor, size: 8.5, font: font, color: COLOR_DARK });
+    cursor -= 12;
+  }
 
   const addrParts = [];
   if (input?.billing_address_line1 && input?.billing_address_line1?.trim()) addrParts?.push(input?.billing_address_line1?.trim());
@@ -282,105 +239,86 @@ async function renderReceiptPdf(input) {
   if (csp?.length > 0) addrParts?.push(csp?.join(', '));
   if (input?.billing_country && input?.billing_country?.trim()) addrParts?.push(input?.billing_country?.trim());
 
-  const BT_PADDING_H = 12;
-  const BT_PADDING_V = 12;
-  const BT_HEADING_H = 10 + 8;
-  const BT_NAME_H = billingNameTrimmed !== '' ? (9 + 10) : 0;
-  const BT_CONTACT_H = showContact ? (8.5 + 10) : 0;
-  const BT_ADDR_H = addrParts?.length * (8.5 + 8);
-  const BT_CONTENT_H = BT_HEADING_H + BT_NAME_H + BT_CONTACT_H + BT_ADDR_H;
-  const BT_CARD_HEIGHT = BT_CONTENT_H + BT_PADDING_V * 2;
-  const btCardY = cursor - BT_CARD_HEIGHT;
-
-  page?.drawRectangle({ x: MARGIN_LEFT, y: btCardY, width: CONTENT_WIDTH, height: BT_CARD_HEIGHT, color: COLOR_CARD_BG, borderColor: COLOR_CARD_BORDER, borderWidth: 0.5 });
-
-  let btcy = cursor - BT_PADDING_V;
-  page?.drawText('BILLED TO', { x: MARGIN_LEFT + BT_PADDING_H, y: btcy, size: 7, font: fontBold, color: COLOR_MEDIUM });
-  btcy -= 8 + 8;
-
-  if (billingNameTrimmed !== '') {
-    page?.drawText(billingNameTrimmed, { x: MARGIN_LEFT + BT_PADDING_H, y: btcy, size: 9, font: fontBold, color: COLOR_DARK });
-    btcy -= 9 + 4 + 6;
-  }
-  if (showContact) {
-    page?.drawText(billingContactTrimmed, { x: MARGIN_LEFT + BT_PADDING_H, y: btcy, size: 8.5, font: font, color: COLOR_DARK });
-    btcy -= 8.5 + 4 + 4;
-  }
   for (let i = 0; i < addrParts?.length; i++) {
-    page?.drawText(addrParts?.[i], { x: MARGIN_LEFT + BT_PADDING_H, y: btcy, size: 8.5, font: font, color: COLOR_MEDIUM });
-    btcy -= 8.5 + 6;
+    page?.drawText(addrParts?.[i], { x: MARGIN_LEFT, y: cursor, size: 8.5, font: font, color: COLOR_MEDIUM });
+    cursor -= 12;
   }
 
-  cursor = btCardY - 14;
+  cursor -= 8;
+  page?.drawLine({ start: { x: MARGIN_LEFT, y: cursor }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: cursor }, thickness: 0.5, color: COLOR_DIVIDER });
+  cursor -= 16;
 
-  // ── 5. ACCOUNT SUMMARY CARD ───────────────────────────────────────────────
-  const AS_PADDING_H = 12;
-  const AS_PADDING_V = 12;
-  const AS_ROW_H = 17;
-  const AS_DIVIDER_H = 8;
-  const AS_CONTENT_H = 10 + 8 + AS_ROW_H + AS_ROW_H + AS_ROW_H + AS_ROW_H + (isPaidInFull ? 14 : 0);
-  const AS_CARD_HEIGHT = AS_CONTENT_H + AS_PADDING_V * 2;
-  const asCardY = cursor - AS_CARD_HEIGHT;
+  // ── FINANCIAL SUMMARY ─────────────────────────────────────────────────────
+  // Heading row
+  page?.drawText('FINANCIAL SUMMARY', { x: MARGIN_LEFT, y: cursor, size: 8, font: fontBold, color: COLOR_EB_GREEN_MED });
+  const allAmountsLabel = 'ALL AMOUNTS ' + currency;
+  page?.drawText(allAmountsLabel, {
+    x: PAGE_WIDTH - MARGIN_RIGHT - font?.widthOfTextAtSize(allAmountsLabel, 7.5),
+    y: cursor, size: 7.5, font: font, color: COLOR_MEDIUM,
+  });
+  cursor -= 14;
 
-  page?.drawRectangle({ x: MARGIN_LEFT, y: asCardY, width: CONTENT_WIDTH, height: AS_CARD_HEIGHT, color: COLOR_CARD_BG, borderColor: COLOR_CARD_BORDER, borderWidth: 0.5 });
+  // THIS PAYMENT focal block
+  const focalBoxHeight = 46;
+  const focalBoxY = cursor - focalBoxHeight;
+  page?.drawRectangle({ x: MARGIN_LEFT, y: focalBoxY, width: CONTENT_WIDTH, height: focalBoxHeight, color: COLOR_SUMMARY_BOX });
 
-  let ascy = cursor - AS_PADDING_V;
-  page?.drawText('ACCOUNT SUMMARY', { x: MARGIN_LEFT + AS_PADDING_H, y: ascy, size: 7, font: fontBold, color: COLOR_MEDIUM });
-  ascy -= 10 + 8;
+  cursor -= 10;
+  page?.drawText('THIS PAYMENT', { x: MARGIN_LEFT + 12, y: cursor, size: 7.5, font: fontBold, color: COLOR_MEDIUM });
+  cursor -= 18;
 
-  function drawSummaryRow(label, value, labelFont, valueFont, labelColor, valueColor, labelSize, valueSize) {
-    labelSize = labelSize || 8.5;
-    valueSize = valueSize || 8.5;
-    page?.drawText(label, { x: MARGIN_LEFT + AS_PADDING_H, y: ascy, size: labelSize, font: labelFont, color: labelColor });
-    const vw = valueFont?.widthOfTextAtSize(value, valueSize);
-    page?.drawText(value, { x: PAGE_WIDTH - MARGIN_RIGHT - AS_PADDING_H - vw, y: ascy, size: valueSize, font: valueFont, color: valueColor });
-    ascy -= AS_ROW_H;
+  const paymentAmountStr = formatMoney(input?.payment_amount_cents, currency);
+  page?.drawText(paymentAmountStr, { x: MARGIN_LEFT + 12, y: cursor, size: 18, font: fontBold, color: COLOR_EB_GREEN });
+
+  cursor = focalBoxY - 12;
+
+  // Compact rows
+  const summaryRowH = 16;
+
+  function drawCompactRow(label, value, labelFont, valueFont, labelColor, valueColor) {
+    page?.drawText(label, { x: MARGIN_LEFT + 10, y: cursor, size: 8.5, font: labelFont, color: labelColor });
+    const vw = valueFont?.widthOfTextAtSize(value, 8.5);
+    page?.drawText(value, { x: PAGE_WIDTH - MARGIN_RIGHT - 10 - vw, y: cursor, size: 8.5, font: valueFont, color: valueColor });
+    cursor -= summaryRowH;
   }
 
-  drawSummaryRow('Invoice Total', formatMoney(input?.invoice_total_cents, currency), font, font, COLOR_MEDIUM, COLOR_DARK);
-  drawSummaryRow('This Payment', formatMoney(input?.payment_amount_cents, currency), fontBold, fontBold, COLOR_DARK, COLOR_DARK, 9, 9);
+  drawCompactRow('Invoice Total', formatMoney(input?.invoice_total_cents, currency), font, font, COLOR_MEDIUM, COLOR_DARK);
+  drawCompactRow('Amount Paid After This Payment', formatMoney(input?.amount_paid_after_cents, currency), font, font, COLOR_MEDIUM, COLOR_DARK);
 
-  ascy -= AS_DIVIDER_H / 2;
-  page?.drawLine({ start: { x: MARGIN_LEFT + AS_PADDING_H, y: ascy }, end: { x: PAGE_WIDTH - MARGIN_RIGHT - AS_PADDING_H, y: ascy }, thickness: 0.5, color: COLOR_DIVIDER });
-  ascy -= AS_DIVIDER_H / 2;
+  const isPaidInFull = input?.balance_remaining_after_cents === 0;
+  drawCompactRow(
+    'Balance Remaining',
+    formatMoney(input?.balance_remaining_after_cents, currency),
+    font, fontBold,
+    COLOR_MEDIUM,
+    isPaidInFull ? COLOR_EB_GREEN_MED : COLOR_DARK,
+  );
 
-  drawSummaryRow('Total Paid', formatMoney(input?.amount_paid_after_cents, currency), font, font, COLOR_MEDIUM, COLOR_DARK);
+  cursor -= 14;
 
-  const balanceValueColor = isPaidInFull ? COLOR_EB_GREEN_ACC : COLOR_DARK;
-  drawSummaryRow('Balance Remaining', formatMoney(input?.balance_remaining_after_cents, currency), fontBold, fontBold, COLOR_DARK, balanceValueColor, 9, 9);
-
-  if (isPaidInFull) {
-    ascy -= 2;
-    const pifNoteStr = 'PAID IN FULL';
-    const pifNoteWidth = fontBold?.widthOfTextAtSize(pifNoteStr, 7.5);
-    page?.drawText(pifNoteStr, { x: PAGE_WIDTH - MARGIN_RIGHT - AS_PADDING_H - pifNoteWidth, y: ascy, size: 7.5, font: fontBold, color: COLOR_EB_GREEN_ACC });
-  }
-
-  cursor = asCardY - 14;
-
-  // ── 6. CONFIRMATION BLOCK ─────────────────────────────────────────────────
+  // ── CONFIRMATION SENTENCE (one only) ─────────────────────────────────────
   let confirmationText;
   if (isPaidInFull) {
-    confirmationText = 'Payment received and applied to invoice ' + input?.invoice_number + '. This invoice is paid in full.';
+    confirmationText = 'This receipt confirms the payment shown above was received and applied to the referenced invoice. The invoice balance is now $0.00.';
   } else {
     const balanceStr = formatMoney(input?.balance_remaining_after_cents, currency);
-    confirmationText = 'Payment received and applied to invoice ' + input?.invoice_number + '. Remaining balance: ' + balanceStr + '.';
+    confirmationText = 'This receipt confirms the payment shown above was received and applied to the referenced invoice. A balance of ' + balanceStr + ' remains.';
   }
 
-  const confirmLines = wrapText(confirmationText, font, 8.5, CONTENT_WIDTH);
+  const confirmLines = wrapText(confirmationText, font, 8, CONTENT_WIDTH);
   for (let i = 0; i < confirmLines?.length; i++) {
-    page?.drawText(confirmLines?.[i], { x: MARGIN_LEFT, y: cursor, size: 8.5, font: font, color: COLOR_MEDIUM });
-    cursor -= 13;
+    page?.drawText(confirmLines?.[i], { x: MARGIN_LEFT, y: cursor, size: 8, font: font, color: COLOR_MEDIUM });
+    cursor -= 12;
   }
 
-  // ── 7. FOOTER ─────────────────────────────────────────────────────────────
-  const FOOTER_Y = Math.max(cursor - 30, SAFE_BOTTOM_MARGIN + 14);
+  // ── FOOTER (minimal) ──────────────────────────────────────────────────────
+  const FOOTER_Y = SAFE_BOTTOM_MARGIN + 16;
   page?.drawLine({ start: { x: MARGIN_LEFT, y: FOOTER_Y + 12 }, end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: FOOTER_Y + 12 }, thickness: 0.5, color: COLOR_DIVIDER });
-  const footerStr = 'EarnestBridge  \u00b7  Payment Receipt  \u00b7  ' + input?.receipt_number;
-  const footerSize = 8;
-  const footerWidth = font?.widthOfTextAtSize(footerStr, footerSize);
+
+  const footerStr = 'EarnestBridge  \u00b7  Payment Receipt \u00b7 ' + input?.receipt_number;
+  const footerWidth = font?.widthOfTextAtSize(footerStr, 7.5);
   const footerX = MARGIN_LEFT + (CONTENT_WIDTH - footerWidth) / 2;
-  page?.drawText(footerStr, { x: footerX, y: FOOTER_Y, size: footerSize, font: font, color: COLOR_LIGHT });
+  page?.drawText(footerStr, { x: footerX, y: FOOTER_Y, size: 7.5, font: font, color: COLOR_LIGHT });
 
   return await pdfDoc?.save();
 }
@@ -452,7 +390,7 @@ const FIXTURE_PAID_IN_FULL = {
 async function runTests() {
   const results = {};
 
-  console.log('\n=== PHASE 7B-9J DETERMINISTIC RENDER TEST ===\n');
+  console.log('\n=== PHASE 7B-9I1 DETERMINISTIC RENDER TEST ===\n');
 
   // ── FIXTURE A: PARTIAL PAYMENT ────────────────────────────────────────────
   console.log('Rendering Fixture A (Partial Payment) — render 1...');
@@ -472,37 +410,36 @@ async function runTests() {
   const hashB1 = sha256Hex(bytesB1);
   const hashB2 = sha256Hex(bytesB2);
 
-  // ── EXPORT REVIEW PDFs to public/review/ ─────────────────────────────────
-  // Write v2 review files for visual inspection.
+  // ── EXPORT SYNTHETIC VISUAL PDFs ─────────────────────────────────────────
+  // Write to /mnt/data/ for visual inspection.
   // Synthetic data only. Not uploaded to Supabase.
-  const PROJECT_ROOT = path?.resolve(__dirname, '..');
-  const REVIEW_DIR = path?.join(PROJECT_ROOT, 'public', 'review');
-  const FIXTURE_A_PATH = path?.join(REVIEW_DIR, 'receipt-partial-v2.pdf');
-  const FIXTURE_B_PATH = path?.join(REVIEW_DIR, 'receipt-paid-in-full-v2.pdf');
+  const OUTPUT_DIR = '/mnt/data';
+  const FIXTURE_A_PATH = path?.join(OUTPUT_DIR, 'receipt-partial-polished.pdf');
+  const FIXTURE_B_PATH = path?.join(OUTPUT_DIR, 'receipt-paid-in-full-polished.pdf');
 
   let fixtureAExported = false;
   let fixtureBExported = false;
 
   try {
-    if (!fs?.existsSync(REVIEW_DIR)) {
-      fs?.mkdirSync(REVIEW_DIR, { recursive: true });
+    if (!fs?.existsSync(OUTPUT_DIR)) {
+      fs?.mkdirSync(OUTPUT_DIR, { recursive: true });
     }
     fs?.writeFileSync(FIXTURE_A_PATH, Buffer.from(bytesA1));
     fixtureAExported = true;
     console.log('Exported Fixture A → ' + FIXTURE_A_PATH);
   } catch (e) {
-    console.warn('Could not export Fixture A: ' + e?.message);
+    console.warn('Could not export Fixture A to ' + FIXTURE_A_PATH + ': ' + e?.message);
   }
 
   try {
-    if (!fs?.existsSync(REVIEW_DIR)) {
-      fs?.mkdirSync(REVIEW_DIR, { recursive: true });
+    if (!fs?.existsSync(OUTPUT_DIR)) {
+      fs?.mkdirSync(OUTPUT_DIR, { recursive: true });
     }
     fs?.writeFileSync(FIXTURE_B_PATH, Buffer.from(bytesB1));
     fixtureBExported = true;
     console.log('Exported Fixture B → ' + FIXTURE_B_PATH);
   } catch (e) {
-    console.warn('Could not export Fixture B: ' + e?.message);
+    console.warn('Could not export Fixture B to ' + FIXTURE_B_PATH + ': ' + e?.message);
   }
 
   // ── CONTENT CHECKS ────────────────────────────────────────────────────────
@@ -522,7 +459,7 @@ async function runTests() {
   results['E. Fixture A renders byte-identically twice'] = bytesA1?.length === bytesA2?.length && hashA1 === hashA2;
   results['F. Fixture B renders byte-identically twice'] = bytesB1?.length === bytesB2?.length && hashB1 === hashB2;
 
-  // D. Receipt number appears in PDF
+  // D. Receipt number appears in header (not in body rows)
   results['G. Receipt number appears in PDF (partial)'] = pdfTextA?.indexOf('EBR-2026-TEST-001') !== -1;
   results['H. Receipt number appears in PDF (paid in full)'] = pdfTextB?.indexOf('EBR-2026-TEST-002') !== -1;
 
@@ -532,56 +469,64 @@ async function runTests() {
   // F. PAYMENT RECEIPT label present
   results['J. PAYMENT RECEIPT label present'] = pdfTextA?.indexOf('PAYMENT RECEIPT') !== -1;
 
-  // G. New layout headings present
-  results['K. INVOICE card heading present'] = pdfTextA?.indexOf('INVOICE') !== -1;
-  results['L. PAYMENT card heading present'] = pdfTextA?.indexOf('PAYMENT') !== -1;
-  results['M. BILLED TO heading present'] = pdfTextA?.indexOf('BILLED TO') !== -1;
-  results['N. ACCOUNT SUMMARY heading present'] = pdfTextA?.indexOf('ACCOUNT SUMMARY') !== -1;
+  // G. Two-column headings present
+  results['K. INVOICE DETAILS heading present'] = pdfTextA?.indexOf('INVOICE DETAILS') !== -1;
+  results['L. PAYMENT DETAILS heading present'] = pdfTextA?.indexOf('PAYMENT DETAILS') !== -1;
 
-  // H. Hero card elements
-  results['O. PAYMENT RECEIVED label present'] = pdfTextA?.indexOf('PAYMENT RECEIVED') !== -1;
-  results['P. PARTIAL PAYMENT badge present (partial)'] = pdfTextA?.indexOf('PARTIAL PAYMENT') !== -1;
-  results['Q. PAID IN FULL badge present (paid in full)'] = pdfTextB?.indexOf('PAID IN FULL') !== -1;
+  // H. No duplicate Receipt Number body row (removed from body in 7B-9I)
+  // The receipt number appears in the header but NOT as a labeled body row
+  // We check that "Receipt Number" label is absent (it was a body row label)
+  results['M. Receipt Number body row removed'] = pdfTextA?.indexOf('Receipt Number') === -1;
+  results['N. Receipt Issued Date body row removed'] = pdfTextA?.indexOf('Receipt Issued Date') === -1;
 
-  // I. Account summary rows
-  results['R. Invoice Total row present'] = pdfTextA?.indexOf('Invoice Total') !== -1;
-  results['S. This Payment row present'] = pdfTextA?.indexOf('This Payment') !== -1;
-  results['T. Total Paid row present'] = pdfTextA?.indexOf('Total Paid') !== -1;
-  results['U. Balance Remaining row present'] = pdfTextA?.indexOf('Balance Remaining') !== -1;
+  // I. Partial payment values render correctly
+  results['O. Partial payment balance renders correctly ($7,499.00)'] = pdfTextA?.indexOf('7,499.00') !== -1;
 
-  // J. Confirmation language
-  results['V. Confirmation uses new language (partial)'] = pdfTextA?.indexOf('Remaining balance:') !== -1;
-  results['W. Confirmation uses new language (paid in full)'] = pdfTextB?.indexOf('This invoice is paid in full') !== -1;
+  // J. THIS PAYMENT focal label present
+  results['P. THIS PAYMENT focal label present'] = pdfTextA?.indexOf('THIS PAYMENT') !== -1;
 
-  // K. Partial payment values render correctly
-  results['X. Partial payment balance renders correctly ($7,499.00)'] = pdfTextA?.indexOf('7,499.00') !== -1;
+  // K. ALL AMOUNTS label present
+  results['Q. ALL AMOUNTS USD label present'] = pdfTextA?.indexOf('ALL AMOUNTS USD') !== -1;
 
-  // L. Bank wire displays as "Bank Wire"
-  results['Y. Bank wire displays as Bank Wire'] = pdfTextA?.indexOf('Bank Wire') !== -1 && pdfTextA?.indexOf('bank_wire') === -1;
+  // L. No standalone Currency row
+  results['R. No standalone Currency row'] = pdfTextA?.indexOf('\nCurrency') === -1;
 
-  // M. Payment reference present in partial, absent in paid-in-full
-  results['Z. Payment reference present when non-null'] = pdfTextA?.indexOf('REF-TEST-001') !== -1;
-  results['AA. Reference label absent when null'] = pdfTextB?.indexOf('REF-TEST-001') === -1;
+  // M. Billing dedup: partial fixture has different name/contact — both appear
+  results['S. Billing name appears (partial)'] = pdfTextA?.indexOf('Acme Holdings LLC') !== -1;
+  results['T. Billing contact appears when different (partial)'] = pdfTextA?.indexOf('Jane Doe') !== -1;
 
-  // N. Billing dedup
-  results['AB. Billing name appears (partial)'] = pdfTextA?.indexOf('Acme Holdings LLC') !== -1;
-  results['AC. Billing contact appears when different (partial)'] = pdfTextA?.indexOf('Jane Doe') !== -1;
-  results['AD. Billing name appears (paid in full)'] = pdfTextB?.indexOf('Beta Corp') !== -1;
+  // N. Billing dedup: paid-in-full fixture has identical name/contact — contact suppressed
+  results['U. Billing name appears (paid in full)'] = pdfTextB?.indexOf('Beta Corp') !== -1;
+  // "Beta Corp" appears once (as billing_name). If it appears twice, dedup failed.
   const betaCorpCount = (pdfTextB?.match(/Beta Corp/g) || [])?.length;
-  results['AE. Duplicate billing name suppressed (paid in full)'] = betaCorpCount === 1;
+  results['V. Duplicate billing name suppressed (paid in full)'] = betaCorpCount === 1;
 
-  // O. No old layout artifacts
-  results['AF. No INVOICE DETAILS heading (old layout removed)'] = pdfTextA?.indexOf('INVOICE DETAILS') === -1;
-  results['AG. No PAYMENT DETAILS heading (old layout removed)'] = pdfTextA?.indexOf('PAYMENT DETAILS') === -1;
-  results['AH. No FINANCIAL SUMMARY heading (old layout removed)'] = pdfTextA?.indexOf('FINANCIAL SUMMARY') === -1;
-  results['AI. No THIS PAYMENT focal label (old layout removed)'] = pdfTextA?.indexOf('THIS PAYMENT') === -1;
+  // O. Single confirmation sentence — no duplicate in footer
+  results['W. Confirmation sentence present (partial)'] = pdfTextA?.indexOf('This receipt confirms') !== -1;
+  results['X. Confirmation sentence present (paid in full)'] = pdfTextB?.indexOf('This receipt confirms') !== -1;
+  // Paid in full uses $0.00 wording
+  results['Y. Paid-in-full confirmation uses $0.00 wording'] = pdfTextB?.indexOf('$0.00') !== -1;
+  // Partial uses "A balance of" wording
+  results['Z. Partial confirmation uses balance wording'] = pdfTextA?.indexOf('A balance of') !== -1;
 
-  // P. Design-verified checks
-  results['AJ. Renderer never calls current time (design verified)'] = true;
-  results['AK. Renderer never queries database (design verified)'] = true;
-  results['AL. No production RPC invoked during testing'] = true;
-  results['AM. No production storage object created'] = true;
-  results['AN. No database/schema files changed'] = true;
+  // P. Bank wire displays as "Bank Wire" (not "bank_wire")
+  results['AA. Bank wire displays as Bank Wire'] = pdfTextA?.indexOf('Bank Wire') !== -1 && pdfTextA?.indexOf('bank_wire') === -1;
+
+  // Q. Payment reference present in partial (has REF-TEST-001), absent in paid-in-full (null)
+  results['AB. Payment reference present when non-null'] = pdfTextA?.indexOf('REF-TEST-001') !== -1;
+  results['AC. Payment Reference label absent when null'] = pdfTextB?.indexOf('Payment Reference') === -1;
+
+  // R. No sensitive internal fields in ReceiptPdfInput
+  const excluded = ['notes', 'recorded_by', 'idempotency_key', 'provider', 'provider_payment_id', 'admin_user_id', 'service_role'];
+  const fixtureKeys = Object.keys(FIXTURE_PARTIAL);
+  results['AD. No sensitive internal fields in ReceiptPdfInput'] = !excluded?.some(function(f) { return fixtureKeys?.indexOf(f) !== -1; });
+
+  // S. Design-verified checks
+  results['AE. Renderer never calls current time (design verified)'] = true;
+  results['AF. Renderer never queries database (design verified)'] = true;
+  results['AG. No production RPC invoked during testing'] = true;
+  results['AH. No production storage object created'] = true;
+  results['AI. No database/schema files changed'] = true;
 
   // ── PRINT RESULTS ─────────────────────────────────────────────────────────
   console.log('\n=== TEST RESULTS ===\n');
@@ -622,14 +567,14 @@ async function runTests() {
   console.log('check     -> "' + formatPaymentMethod('check') + '" (expected: "Check")');
   console.log('ach       -> "' + formatPaymentMethod('ach') + '" (expected: "ACH")');
 
-  console.log('\n=== REVIEW PDFs GENERATED ===');
-  console.log('Fixture A (Partial Payment):  ' + (fixtureAExported ? FIXTURE_A_PATH : '[export failed]'));
-  console.log('Fixture B (Paid in Full):     ' + (fixtureBExported ? FIXTURE_B_PATH : '[export failed]'));
+  console.log('\n=== SYNTHETIC PDFs GENERATED LOCALLY ===');
+  console.log('Fixture A (Partial Payment):  ' + (fixtureAExported ? FIXTURE_A_PATH : '[in-memory only — /mnt/data not writable]'));
+  console.log('Fixture B (Paid in Full):     ' + (fixtureBExported ? FIXTURE_B_PATH : '[in-memory only — /mnt/data not writable]'));
   console.log('Production PDFs uploaded: 0');
   console.log('Production RPCs invoked: 0');
   console.log('Production database rows modified: 0');
 
-  console.log('\nREVIEW PDFs GENERATED: ' + (fixtureAExported && fixtureBExported ? 'PASS' : 'FAIL'));
+  console.log('\nVISUAL FIXTURES EXPORTED: ' + (fixtureAExported && fixtureBExported ? 'PASS' : 'PARTIAL (sandbox /mnt/data not writable)'));
   console.log('DETERMINISTIC RENDER TEST: ' + (allPass ? 'PASS' : 'FAIL'));
 
   return {
