@@ -153,7 +153,7 @@ interface CompleteReceiptResponse {
   already_complete?: boolean;
   receipt_number: string;
   receipt_issued_at: string;
-  receipt_pdf_generated_at: string | null;
+  generated_at: string | null;
   payment_id: string;
   invoice_id: string;
 }
@@ -574,7 +574,7 @@ export async function generateReceiptPdf(
     already_complete: completeData.already_complete === true,
     receipt_number: completeData.receipt_number,
     receipt_issued_at: completeData.receipt_issued_at,
-    generated_at: completeData.receipt_pdf_generated_at ?? null,
+    generated_at: completeData.generated_at ?? null,
     payment_id: prepareData.payment_id,
     invoice_id: prepareData.invoice_id,
   };

@@ -12,6 +12,8 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const { createHash } = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // ── Fixed PDF metadata date (same constant as receiptPdf.ts) ────────────────
 const FIXED_PDF_METADATA_DATE = new Date('2000-01-01T00:00:00.000Z');
@@ -388,7 +390,7 @@ const FIXTURE_PAID_IN_FULL = {
 async function runTests() {
   const results = {};
 
-  console.log('\n=== PHASE 7B-9I DETERMINISTIC RENDER TEST ===\n');
+  console.log('\n=== PHASE 7B-9I1 DETERMINISTIC RENDER TEST ===\n');
 
   // ── FIXTURE A: PARTIAL PAYMENT ────────────────────────────────────────────
   console.log('Rendering Fixture A (Partial Payment) — render 1...');
@@ -407,6 +409,38 @@ async function runTests() {
 
   const hashB1 = sha256Hex(bytesB1);
   const hashB2 = sha256Hex(bytesB2);
+
+  // ── EXPORT SYNTHETIC VISUAL PDFs ─────────────────────────────────────────
+  // Write to /mnt/data/ for visual inspection.
+  // Synthetic data only. Not uploaded to Supabase.
+  const OUTPUT_DIR = '/mnt/data';
+  const FIXTURE_A_PATH = path?.join(OUTPUT_DIR, 'receipt-partial-polished.pdf');
+  const FIXTURE_B_PATH = path?.join(OUTPUT_DIR, 'receipt-paid-in-full-polished.pdf');
+
+  let fixtureAExported = false;
+  let fixtureBExported = false;
+
+  try {
+    if (!fs?.existsSync(OUTPUT_DIR)) {
+      fs?.mkdirSync(OUTPUT_DIR, { recursive: true });
+    }
+    fs?.writeFileSync(FIXTURE_A_PATH, Buffer.from(bytesA1));
+    fixtureAExported = true;
+    console.log('Exported Fixture A → ' + FIXTURE_A_PATH);
+  } catch (e) {
+    console.warn('Could not export Fixture A to ' + FIXTURE_A_PATH + ': ' + e?.message);
+  }
+
+  try {
+    if (!fs?.existsSync(OUTPUT_DIR)) {
+      fs?.mkdirSync(OUTPUT_DIR, { recursive: true });
+    }
+    fs?.writeFileSync(FIXTURE_B_PATH, Buffer.from(bytesB1));
+    fixtureBExported = true;
+    console.log('Exported Fixture B → ' + FIXTURE_B_PATH);
+  } catch (e) {
+    console.warn('Could not export Fixture B to ' + FIXTURE_B_PATH + ': ' + e?.message);
+  }
 
   // ── CONTENT CHECKS ────────────────────────────────────────────────────────
   const pdfTextA = Buffer.from(bytesA1)?.toString('latin1');
@@ -534,18 +568,21 @@ async function runTests() {
   console.log('ach       -> "' + formatPaymentMethod('ach') + '" (expected: "ACH")');
 
   console.log('\n=== SYNTHETIC PDFs GENERATED LOCALLY ===');
-  console.log('Fixture A (Partial Payment):  [in-memory only, not written to disk]');
-  console.log('Fixture B (Paid in Full):     [in-memory only, not written to disk]');
+  console.log('Fixture A (Partial Payment):  ' + (fixtureAExported ? FIXTURE_A_PATH : '[in-memory only — /mnt/data not writable]'));
+  console.log('Fixture B (Paid in Full):     ' + (fixtureBExported ? FIXTURE_B_PATH : '[in-memory only — /mnt/data not writable]'));
   console.log('Production PDFs uploaded: 0');
   console.log('Production RPCs invoked: 0');
   console.log('Production database rows modified: 0');
 
-  console.log('\nDETERMINISTIC RENDER TEST: ' + (allPass ? 'PASS' : 'FAIL'));
+  console.log('\nVISUAL FIXTURES EXPORTED: ' + (fixtureAExported && fixtureBExported ? 'PASS' : 'PARTIAL (sandbox /mnt/data not writable)'));
+  console.log('DETERMINISTIC RENDER TEST: ' + (allPass ? 'PASS' : 'FAIL'));
 
   return {
     hashA1, hashA2, lenA1: bytesA1?.length, lenA2: bytesA2?.length,
     hashB1, hashB2, lenB1: bytesB1?.length, lenB2: bytesB2?.length,
     allPass,
+    fixtureAExported,
+    fixtureBExported,
   };
 }
 
