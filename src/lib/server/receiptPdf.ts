@@ -1,7 +1,7 @@
 /**
  * src/lib/server/receiptPdf.ts
  *
- * Phase: 7B-9I — Receipt PDF Renderer (Visual Polish)
+ * Phase: 7B-9L — Receipt PDF Renderer (Approved V2 Design)
  *
  * Pure server-side receipt PDF renderer.
  *
@@ -30,9 +30,6 @@
  * CreationDate / ModificationDate / Creator / Producer, which would make
  * PDF bytes differ between renders of the same snapshot.
  *
- * The user-facing "Receipt Issued Date" is rendered as body text from
- * receipt_issued_at — NOT from PDF metadata.
- *
  * MONEY FORMATTING
  * ----------------
  * Integer cents only. No floating-point arithmetic.
@@ -43,50 +40,53 @@
  * DATE FORMATTING
  * ---------------
  * All displayed dates come exclusively from input fields:
- *   receipt_issued_at   → Receipt Issued Date (header only)
- *   payment_received_at → Payment Received Date
- *   invoice_issued_at   → Invoice Issued Date
+ *   receipt_issued_at   → Issued date (header)
+ *   payment_received_at → Payment received date
+ *   invoice_issued_at   → Invoice issued date
  * The renderer never calls new Date() for displayed dates.
  *
  * PAYMENT METHOD LABELS
  * ---------------------
- * Internal enum values are mapped to clean user-facing labels:
- *   bank_wire → Bank Wire
- *   check     → Check
- *   ach       → ACH
+ *   bank_wire   → Bank Wire
+ *   check       → Check
+ *   ach         → ACH
  *   credit_card → Credit Card
- *   other     → Other
+ *   other       → Other
  *
- * LAYOUT (7B-9I)
- * --------------
- * Header:
- *   LEFT:  EarnestBridge wordmark + "Lock up the Deal." tagline
- *   RIGHT: PAYMENT RECEIPT (section title)
- *          EBR-YYYY-NNNNNN (prominent)
- *          Issued {date} (secondary)
+ * LAYOUT (7B-9L — Approved V2)
+ * ----------------------------
+ * 1. Full-width dark green header band (~78pt)
+ *    LEFT:  EarnestBridge / Lock up the Deal.
+ *    RIGHT: PAYMENT RECEIPT / {receipt_number} / Issued {date}
  *
- * Details (two-column):
- *   LEFT:  INVOICE DETAILS — Invoice Number, Invoice Issued Date
- *   RIGHT: PAYMENT DETAILS — Payment Received Date, Payment Method, Payment Reference
+ * 2. Payment hero card
+ *    Status badge: PAID IN FULL (green) or PARTIAL PAYMENT (neutral)
+ *    PAYMENT RECEIVED label
+ *    Large payment amount
+ *    {payment date} · {payment method}
+ *    Reference: {ref} (if present)
  *
- * Billed To:
- *   billing_name
- *   billing_contact_name ONLY IF non-empty AND different from billing_name
- *   address lines
+ * 3. Two side-by-side info cards
+ *    LEFT  — INVOICE: Invoice Number, Invoice Date
+ *    RIGHT — PAYMENT: Received, Method, Reference (if present)
  *
- * Financial Summary:
- *   Heading: FINANCIAL SUMMARY   ALL AMOUNTS {currency}
- *   THIS PAYMENT (focal, large bold)
- *   $amount (very large bold)
- *   Then compact rows: Invoice Total, Amount Paid After This Payment, Balance Remaining
+ * 4. Full-width BILLED TO card
+ *    billing_name
+ *    billing_contact_name (only if non-empty AND different from billing_name)
+ *    address lines
  *
- * Confirmation (one sentence, below summary):
- *   Partial: "This receipt confirms the payment shown above was received and
- *             applied to the referenced invoice. A balance of {balance} remains."
- *   Full:    "This receipt confirms the payment shown above was received and *             applied to the referenced invoice. The invoice balance is now $0.00."
+ * 5. Account summary card
+ *    Invoice Total / This Payment / Total Paid / Balance Remaining
+ *    Right-aligned monetary values
+ *    Balance Remaining strongest row
+ *    $0.00 in EB green when paid in full
  *
- * Footer (minimal):
- *   Rule + "EarnestBridge  ·  Payment Receipt · {receipt_number}"
+ * 6. Single confirmation sentence
+ *    Partial: "Payment received and applied to invoice {n}. Remaining balance: {b}."
+ *    Full:    "Payment received and applied to invoice {n}. This invoice is paid in full."
+ *
+ * 7. Minimal footer
+ *    Rule + "EarnestBridge · Payment Receipt · {receipt_number}"
  */
 
 import 'server-only';
@@ -95,9 +95,6 @@ import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
 
 // ---------------------------------------------------------------------------
 // Fixed PDF metadata date — NEVER changes between renders.
-// This is NOT the receipt issued date. It is a fixed anchor used only for
-// PDF document metadata (CreationDate, ModificationDate) to ensure
-// byte-identical output across renders of the same snapshot.
 // ---------------------------------------------------------------------------
 
 const FIXED_PDF_METADATA_DATE = new Date('2000-01-01T00:00:00.000Z');
@@ -120,39 +117,29 @@ export class ReceiptPdfError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// ReceiptPdfInput — strict type containing ONLY the immutable values
-// returned by prepare_receipt_generation() that are required to render.
-//
-// Explicitly excluded:
-//   notes, recorded_by, idempotency_key, provider, provider_payment_id,
-//   Admin UUID, Admin email, service-role information, storage path.
+// ReceiptPdfInput
 // ---------------------------------------------------------------------------
 
 export interface ReceiptPdfInput {
-  // Receipt identity (write-once, set at PREPARE)
   receipt_number: string;
-  receipt_issued_at: string; // ISO 8601 timestamptz
+  receipt_issued_at: string;
 
-  // Payment facts
   payment_id: string;
   payment_amount_cents: number;
-  payment_received_at: string; // ISO 8601 timestamptz
+  payment_received_at: string;
   payment_method: string;
   payment_reference_number: string | null;
   payment_currency: string;
 
-  // Running totals snapshot
   amount_paid_after_cents: number;
   balance_remaining_after_cents: number;
 
-  // Invoice snapshot
   invoice_id: string;
   invoice_number: string;
   invoice_total_cents: number;
-  invoice_issued_at: string; // ISO 8601 timestamptz
+  invoice_issued_at: string;
   invoice_currency: string;
 
-  // Billing / payer snapshot
   billing_name: string | null;
   billing_contact_name: string | null;
   billing_address_line1: string | null;
@@ -188,7 +175,6 @@ function validateInput(input: ReceiptPdfInput): void {
     );
   }
 
-  // Validate timestamps parse correctly
   const tsFields: Array<[string, string]> = [
     [input.receipt_issued_at, 'receipt_issued_at'],
     [input.payment_received_at, 'payment_received_at'],
@@ -204,7 +190,6 @@ function validateInput(input: ReceiptPdfInput): void {
     }
   }
 
-  // Money fields: safe integers
   const moneyFields: Array<[number, string]> = [
     [input.payment_amount_cents, 'payment_amount_cents'],
     [input.amount_paid_after_cents, 'amount_paid_after_cents'],
@@ -235,7 +220,7 @@ function validateInput(input: ReceiptPdfInput): void {
 }
 
 // ---------------------------------------------------------------------------
-// Money formatting — integer cents only, no floating-point arithmetic
+// Money formatting — integer cents only
 // ---------------------------------------------------------------------------
 
 function formatMoney(cents: number, currency: string = 'USD'): string {
@@ -244,7 +229,6 @@ function formatMoney(cents: number, currency: string = 'USD'): string {
   const dollars = Math.floor(absCents / 100);
   const centsRemainder = absCents % 100;
 
-  // Build thousands-separated dollars string without locale dependency
   const dollarsStr = dollars.toString();
   let dollarsFormatted = '';
   for (let i = 0; i < dollarsStr.length; i++) {
@@ -261,25 +245,20 @@ function formatMoney(cents: number, currency: string = 'USD'): string {
 }
 
 // ---------------------------------------------------------------------------
-// Date formatting — from ISO 8601 timestamptz input only
-// Never calls new Date() without an input value.
+// Date formatting — from ISO 8601 input only
 // ---------------------------------------------------------------------------
 
 function formatTimestamp(isoString: string): string {
   const d = new Date(isoString);
-  // Use UTC to avoid server timezone affecting display
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
   ];
-  const month = months[d.getUTCMonth()];
-  const day = d.getUTCDate();
-  const year = d.getUTCFullYear();
-  return `${month} ${day}, ${year}`;
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
 }
 
 // ---------------------------------------------------------------------------
-// Payment method label — clean user-facing display
+// Payment method label
 // ---------------------------------------------------------------------------
 
 function formatPaymentMethod(method: string): string {
@@ -303,118 +282,22 @@ function wrapText(
   fontSize: number,
   maxWidth: number,
 ): string[] {
-  const paragraphs = text.split(/\r?\n/);
+  const words = text.split(' ');
   const result: string[] = [];
+  let currentLine = '';
 
-  for (const paragraph of paragraphs) {
-    if (paragraph.length === 0) {
-      result.push('');
-      continue;
+  for (const word of words) {
+    if (!word) continue;
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (font.widthOfTextAtSize(testLine, fontSize) <= maxWidth) {
+      currentLine = testLine;
+    } else {
+      if (currentLine) result.push(currentLine);
+      currentLine = word;
     }
-
-    const words = paragraph.split(' ');
-    let currentLine = '';
-
-    for (const word of words) {
-      if (word.length === 0) continue;
-
-      const tokenWidth = font.widthOfTextAtSize(word, fontSize);
-      if (tokenWidth > maxWidth) {
-        throw new ReceiptPdfError(
-          'RECEIPT_PDF_CONTENT_OVERFLOW',
-          'A content token exceeds the permitted column width.',
-        );
-      }
-
-      const testLine = currentLine ? `${currentLine} ${word}` : word;
-      const testWidth = font.widthOfTextAtSize(testLine, fontSize);
-
-      if (testWidth <= maxWidth) {
-        currentLine = testLine;
-      } else {
-        if (currentLine) result.push(currentLine);
-        currentLine = word;
-      }
-    }
-
-    if (currentLine) result.push(currentLine);
   }
-
+  if (currentLine) result.push(currentLine);
   return result;
-}
-
-// ---------------------------------------------------------------------------
-// Drawing context
-// ---------------------------------------------------------------------------
-
-interface DrawContext {
-  page: PDFPage;
-  font: PDFFont;
-  fontBold: PDFFont;
-  pageWidth: number;
-  pageHeight: number;
-  marginLeft: number;
-  marginRight: number;
-  contentWidth: number;
-  cursor: number;
-  safeBottomMargin: number;
-}
-
-function checkOverflow(ctx: DrawContext, requiredHeight: number): void {
-  if (ctx.cursor - requiredHeight < ctx.safeBottomMargin) {
-    throw new ReceiptPdfError(
-      'RECEIPT_PDF_CONTENT_OVERFLOW',
-      'Receipt content exceeds one-page limit.',
-    );
-  }
-}
-
-function drawText(
-  ctx: DrawContext,
-  text: string,
-  x: number,
-  y: number,
-  options: {
-    font?: PDFFont;
-    size?: number;
-    color?: ReturnType<typeof rgb>;
-  } = {},
-): void {
-  ctx.page.drawText(text, {
-    x,
-    y,
-    size: options.size ?? 9,
-    font: options.font ?? ctx.font,
-    color: options.color ?? rgb(0.1, 0.1, 0.1),
-  });
-}
-
-function drawLine(
-  ctx: DrawContext,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  thickness: number = 0.5,
-  color: ReturnType<typeof rgb> = rgb(0.82, 0.82, 0.78),
-): void {
-  ctx.page.drawLine({
-    start: { x: x1, y: y1 },
-    end: { x: x2, y: y2 },
-    thickness,
-    color,
-  });
-}
-
-function drawRect(
-  ctx: DrawContext,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  color: ReturnType<typeof rgb>,
-): void {
-  ctx.page.drawRectangle({ x, y, width, height, color });
 }
 
 // ---------------------------------------------------------------------------
@@ -422,7 +305,6 @@ function drawRect(
 // ---------------------------------------------------------------------------
 
 export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Array> {
-  // 1. Validate input
   try {
     validateInput(input);
   } catch (err) {
@@ -430,7 +312,6 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
     throw new ReceiptPdfError('RECEIPT_PDF_INVALID_DATA', 'Input validation failed.');
   }
 
-  // 2. Create PDF document
   let pdfDoc: PDFDocument;
   try {
     pdfDoc = await PDFDocument.create();
@@ -438,10 +319,7 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
     throw new ReceiptPdfError('RECEIPT_PDF_RENDER_ERROR', 'Failed to create PDF document.');
   }
 
-  // 3. Set DETERMINISTIC PDF metadata
-  // All four auto-generated fields are explicitly overridden with a fixed
-  // constant date. This prevents pdf-lib from injecting the current wall-clock
-  // time, which would make PDF bytes differ between renders.
+  // Deterministic metadata
   pdfDoc.setTitle(`EarnestBridge Receipt ${input.receipt_number}`);
   pdfDoc.setAuthor('EarnestBridge');
   pdfDoc.setSubject('Payment Receipt');
@@ -450,7 +328,6 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
   pdfDoc.setCreationDate(FIXED_PDF_METADATA_DATE);
   pdfDoc.setModificationDate(FIXED_PDF_METADATA_DATE);
 
-  // 4. Embed fonts
   let font: PDFFont;
   let fontBold: PDFFont;
   try {
@@ -460,477 +337,439 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
     throw new ReceiptPdfError('RECEIPT_PDF_RENDER_ERROR', 'Failed to embed fonts.');
   }
 
-  // 5. Add US Letter page (612 x 792 points)
-  const PAGE_WIDTH = 612;
-  const PAGE_HEIGHT = 792;
-  const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  // US Letter
+  const PAGE_W = 612;
+  const PAGE_H = 792;
+  const page: PDFPage = pdfDoc.addPage([PAGE_W, PAGE_H]);
 
   // Layout constants
-  const MARGIN_LEFT = 50;
-  const MARGIN_RIGHT = 50;
-  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-  const SAFE_BOTTOM_MARGIN = 50;
+  const ML = 40;           // margin left
+  const MR = 40;           // margin right
+  const CW = PAGE_W - ML - MR; // content width = 532
+  const SAFE_BOT = 48;
 
-  // Color palette — EarnestBridge branded
-  const COLOR_PAGE_BG      = rgb(0.97, 0.97, 0.94); // warm ivory
-  const COLOR_EB_GREEN     = rgb(0.06, 0.18, 0.13); // dark EB green
-  const COLOR_EB_GREEN_MED = rgb(0.22, 0.38, 0.28); // medium green
-  const COLOR_DIVIDER      = rgb(0.82, 0.82, 0.78); // light divider
-  const COLOR_SUMMARY_BOX  = rgb(0.93, 0.93, 0.90); // slightly darker ivory
-  const COLOR_DARK         = rgb(0.10, 0.10, 0.10);
-  const COLOR_MEDIUM       = rgb(0.38, 0.38, 0.35);
-  const COLOR_LIGHT        = rgb(0.55, 0.55, 0.52);
-  const COLOR_WHITE        = rgb(1.0, 1.0, 1.0);
+  // ── Color palette ──────────────────────────────────────────────────────────
+  const C_WHITE        = rgb(1.00, 1.00, 1.00);
+  const C_PAGE_BG      = rgb(0.97, 0.97, 0.95);
+  const C_EB_GREEN     = rgb(0.06, 0.18, 0.13);  // dark header green
+  const C_EB_GREEN_MED = rgb(0.18, 0.38, 0.26);  // medium green (badges, accents)
+  const C_EB_GREEN_LT  = rgb(0.88, 0.95, 0.90);  // light green badge bg
+  const C_CARD_BG      = rgb(1.00, 1.00, 1.00);  // card background
+  const C_CARD_BG2     = rgb(0.96, 0.97, 0.96);  // slightly tinted card
+  const C_DIVIDER      = rgb(0.84, 0.84, 0.82);
+  const C_DARK         = rgb(0.10, 0.10, 0.10);
+  const C_MEDIUM       = rgb(0.40, 0.40, 0.38);
+  const C_LIGHT        = rgb(0.58, 0.58, 0.56);
+  const C_NEUTRAL_BADGE_BG = rgb(0.92, 0.92, 0.90);
+  const C_NEUTRAL_BADGE_FG = rgb(0.35, 0.35, 0.33);
 
-  // Minimal draw context for background/accent (cursor not used here)
-  const bgCtx: DrawContext = {
-    page, font, fontBold,
-    pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT,
-    marginLeft: MARGIN_LEFT, marginRight: MARGIN_RIGHT,
-    contentWidth: CONTENT_WIDTH,
-    cursor: PAGE_HEIGHT,
-    safeBottomMargin: SAFE_BOTTOM_MARGIN,
-  };
+  // Page background
+  page.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: PAGE_H, color: C_PAGE_BG });
 
-  // Draw page background
-  drawRect(bgCtx, 0, 0, PAGE_WIDTH, PAGE_HEIGHT, COLOR_PAGE_BG);
-
-  // Top accent strip (4pt)
-  drawRect(bgCtx, 0, PAGE_HEIGHT - 4, PAGE_WIDTH, 4, COLOR_EB_GREEN);
-
-  // Drawing context
-  const ctx: DrawContext = {
-    page,
-    font,
-    fontBold,
-    pageWidth: PAGE_WIDTH,
-    pageHeight: PAGE_HEIGHT,
-    marginLeft: MARGIN_LEFT,
-    marginRight: MARGIN_RIGHT,
-    contentWidth: CONTENT_WIDTH,
-    cursor: PAGE_HEIGHT - 4,
-    safeBottomMargin: SAFE_BOTTOM_MARGIN,
-  };
-
+  const isPaidInFull = input.balance_remaining_after_cents === 0;
   const currency = input.payment_currency;
 
-  // ── HEADER ───────────────────────────────────────────────────────────────
-  // LEFT:  EarnestBridge wordmark + tagline
-  // RIGHT: PAYMENT RECEIPT (section title)
-  //        receipt number (prominent)
-  //        Issued {date} (secondary)
+  // ── CURSOR ─────────────────────────────────────────────────────────────────
+  let y = PAGE_H;
 
-  ctx.cursor -= 34;
+  // ── 1. FULL-WIDTH DARK GREEN HEADER BAND ──────────────────────────────────
+  // Approx 78pt height
+  const HEADER_H = 78;
+  const HEADER_Y = PAGE_H - HEADER_H;
 
-  // "EarnestBridge" wordmark (left)
-  drawText(ctx, 'EarnestBridge', MARGIN_LEFT, ctx.cursor, {
-    font: fontBold,
-    size: 16,
-    color: COLOR_EB_GREEN,
+  page.drawRectangle({ x: 0, y: HEADER_Y, width: PAGE_W, height: HEADER_H, color: C_EB_GREEN });
+
+  // LEFT side: EarnestBridge wordmark + tagline
+  const wordmarkY = HEADER_Y + 46;
+  page.drawText('EarnestBridge', {
+    x: ML, y: wordmarkY,
+    size: 17, font: fontBold, color: C_WHITE,
+  });
+  page.drawText('Lock up the Deal.', {
+    x: ML, y: wordmarkY - 16,
+    size: 8.5, font, color: rgb(0.78, 0.88, 0.82),
   });
 
-  // "PAYMENT RECEIPT" — section title (right, top line)
-  const receiptLabel = 'PAYMENT RECEIPT';
-  const receiptLabelWidth = fontBold.widthOfTextAtSize(receiptLabel, 10);
-  drawText(ctx, receiptLabel, PAGE_WIDTH - MARGIN_RIGHT - receiptLabelWidth, ctx.cursor, {
-    font: fontBold,
-    size: 10,
-    color: COLOR_EB_GREEN_MED,
-  });
-
-  ctx.cursor -= 8;
-
-  // Tagline (left)
-  drawText(ctx, 'Lock up the Deal.', MARGIN_LEFT, ctx.cursor, {
-    font,
-    size: 8,
-    color: COLOR_MEDIUM,
-  });
-
-  // Receipt number — prominent (right, second line)
+  // RIGHT side: PAYMENT RECEIPT / receipt_number / Issued date
+  const receiptTitleStr = 'PAYMENT RECEIPT';
   const receiptNumStr = input.receipt_number;
-  const receiptNumWidth = fontBold.widthOfTextAtSize(receiptNumStr, 11);
-  drawText(ctx, receiptNumStr, PAGE_WIDTH - MARGIN_RIGHT - receiptNumWidth, ctx.cursor, {
-    font: fontBold,
-    size: 11,
-    color: COLOR_DARK,
+  const issuedStr = `Issued ${formatTimestamp(input.receipt_issued_at)}`;
+
+  const receiptTitleW = fontBold.widthOfTextAtSize(receiptTitleStr, 9);
+  const receiptNumW = fontBold.widthOfTextAtSize(receiptNumStr, 12);
+  const issuedW = font.widthOfTextAtSize(issuedStr, 8);
+
+  const RIGHT_X = PAGE_W - MR;
+
+  page.drawText(receiptTitleStr, {
+    x: RIGHT_X - receiptTitleW, y: wordmarkY,
+    size: 9, font: fontBold, color: rgb(0.72, 0.85, 0.78),
+  });
+  page.drawText(receiptNumStr, {
+    x: RIGHT_X - receiptNumW, y: wordmarkY - 15,
+    size: 12, font: fontBold, color: C_WHITE,
+  });
+  page.drawText(issuedStr, {
+    x: RIGHT_X - issuedW, y: wordmarkY - 28,
+    size: 8, font, color: rgb(0.72, 0.85, 0.78),
   });
 
-  ctx.cursor -= 10;
+  y = HEADER_Y - 14;
 
-  // Issued date — secondary (right, third line)
-  const issuedDateStr = `Issued ${formatTimestamp(input.receipt_issued_at)}`;
-  const issuedDateWidth = font.widthOfTextAtSize(issuedDateStr, 8);
-  drawText(ctx, issuedDateStr, PAGE_WIDTH - MARGIN_RIGHT - issuedDateWidth, ctx.cursor, {
-    font,
-    size: 8,
-    color: COLOR_MEDIUM,
+  // ── 2. PAYMENT HERO CARD ──────────────────────────────────────────────────
+  // Status badge + PAYMENT RECEIVED + large amount + date · method + reference
+  const HERO_CARD_H = 100;
+  const HERO_CARD_Y = y - HERO_CARD_H;
+
+  page.drawRectangle({
+    x: ML, y: HERO_CARD_Y,
+    width: CW, height: HERO_CARD_H,
+    color: C_CARD_BG,
+  });
+  // Card border
+  page.drawRectangle({
+    x: ML, y: HERO_CARD_Y,
+    width: CW, height: HERO_CARD_H,
+    color: C_DIVIDER,
+    borderWidth: 0.5,
+    borderColor: C_DIVIDER,
   });
 
-  ctx.cursor -= 14;
+  // Status badge
+  const badgeText = isPaidInFull ? 'PAID IN FULL' : 'PARTIAL PAYMENT';
+  const badgeBgColor = isPaidInFull ? C_EB_GREEN_LT : C_NEUTRAL_BADGE_BG;
+  const badgeFgColor = isPaidInFull ? C_EB_GREEN_MED : C_NEUTRAL_BADGE_FG;
+  const badgeTextW = fontBold.widthOfTextAtSize(badgeText, 7.5);
+  const badgePadX = 8;
+  const badgePadY = 4;
+  const badgeW = badgeTextW + badgePadX * 2;
+  const badgeH = 14;
+  const badgeX = ML + 16;
+  const badgeY = HERO_CARD_Y + HERO_CARD_H - 20;
 
-  // Header divider
-  checkOverflow(ctx, 2);
-  drawLine(ctx, MARGIN_LEFT, ctx.cursor, PAGE_WIDTH - MARGIN_RIGHT, ctx.cursor, 1.0, COLOR_EB_GREEN);
-  ctx.cursor -= 18;
-
-  // ── TWO-COLUMN DETAILS SECTION ───────────────────────────────────────────
-  // LEFT:  INVOICE DETAILS — Invoice Number, Invoice Issued Date
-  // RIGHT: PAYMENT DETAILS — Payment Received Date, Payment Method, Payment Reference
-
-  const COL_MID = MARGIN_LEFT + Math.floor(CONTENT_WIDTH / 2) + 4;
-  const COL_LEFT_WIDTH = COL_MID - MARGIN_LEFT - 8;
-  const COL_RIGHT_WIDTH = PAGE_WIDTH - MARGIN_RIGHT - COL_MID;
-
-  // Column label x positions
-  const LEFT_LABEL_X = MARGIN_LEFT;
-  const RIGHT_LABEL_X = COL_MID;
-
-  // Column value x positions (indented from label)
-  const LEFT_VALUE_X = MARGIN_LEFT;
-  const RIGHT_VALUE_X = COL_MID;
-
-  // Measure how tall each column will be
-  // Left: heading + invoice number + invoice issued date
-  // Right: heading + payment received date + payment method + optional reference
-
-  const detailsStartCursor = ctx.cursor;
-
-  // ── LEFT COLUMN: INVOICE DETAILS ─────────────────────────────────────────
-
-  checkOverflow(ctx, 10);
-  drawText(ctx, 'INVOICE DETAILS', LEFT_LABEL_X, ctx.cursor, {
-    font: fontBold,
-    size: 7.5,
-    color: COLOR_EB_GREEN_MED,
+  page.drawRectangle({
+    x: badgeX, y: badgeY - badgePadY,
+    width: badgeW, height: badgeH,
+    color: badgeBgColor,
+  });
+  page.drawText(badgeText, {
+    x: badgeX + badgePadX, y: badgeY,
+    size: 7.5, font: fontBold, color: badgeFgColor,
   });
 
-  // Track left cursor separately
-  let leftCursor = ctx.cursor - 12;
-
-  // Invoice Number
-  drawText(ctx, 'Invoice Number', LEFT_LABEL_X, leftCursor, {
-    font,
-    size: 8,
-    color: COLOR_MEDIUM,
-  });
-  leftCursor -= 11;
-  drawText(ctx, input.invoice_number, LEFT_VALUE_X, leftCursor, {
-    font: fontBold,
-    size: 8.5,
-    color: COLOR_DARK,
-  });
-  leftCursor -= 13;
-
-  // Invoice Issued Date
-  drawText(ctx, 'Invoice Issued Date', LEFT_LABEL_X, leftCursor, {
-    font,
-    size: 8,
-    color: COLOR_MEDIUM,
-  });
-  leftCursor -= 11;
-  drawText(ctx, formatTimestamp(input.invoice_issued_at), LEFT_VALUE_X, leftCursor, {
-    font: fontBold,
-    size: 8.5,
-    color: COLOR_DARK,
-  });
-  leftCursor -= 13;
-
-  // ── RIGHT COLUMN: PAYMENT DETAILS ────────────────────────────────────────
-
-  let rightCursor = detailsStartCursor;
-
-  drawText(ctx, 'PAYMENT DETAILS', RIGHT_LABEL_X, rightCursor, {
-    font: fontBold,
-    size: 7.5,
-    color: COLOR_EB_GREEN_MED,
+  // PAYMENT RECEIVED label
+  const prLabelY = badgeY - 18;
+  page.drawText('PAYMENT RECEIVED', {
+    x: ML + 16, y: prLabelY,
+    size: 7.5, font: fontBold, color: C_MEDIUM,
   });
 
-  rightCursor -= 12;
+  // Large payment amount
+  const amountStr = formatMoney(input.payment_amount_cents, currency);
+  const amountY = prLabelY - 22;
+  page.drawText(amountStr, {
+    x: ML + 16, y: amountY,
+    size: 22, font: fontBold, color: C_EB_GREEN,
+  });
 
-  // Payment Received Date
-  drawText(ctx, 'Payment Received Date', RIGHT_LABEL_X, rightCursor, {
-    font,
-    size: 8,
-    color: COLOR_MEDIUM,
+  // Date · Method line
+  const dateMethodStr = `${formatTimestamp(input.payment_received_at)}  ·  ${formatPaymentMethod(input.payment_method)}`;
+  const dateMethodY = amountY - 16;
+  page.drawText(dateMethodStr, {
+    x: ML + 16, y: dateMethodY,
+    size: 8, font, color: C_MEDIUM,
   });
-  rightCursor -= 11;
-  drawText(ctx, formatTimestamp(input.payment_received_at), RIGHT_VALUE_X, rightCursor, {
-    font: fontBold,
-    size: 8.5,
-    color: COLOR_DARK,
-  });
-  rightCursor -= 13;
 
-  // Payment Method
-  drawText(ctx, 'Payment Method', RIGHT_LABEL_X, rightCursor, {
-    font,
-    size: 8,
-    color: COLOR_MEDIUM,
-  });
-  rightCursor -= 11;
-  drawText(ctx, formatPaymentMethod(input.payment_method), RIGHT_VALUE_X, rightCursor, {
-    font: fontBold,
-    size: 8.5,
-    color: COLOR_DARK,
-  });
-  rightCursor -= 13;
-
-  // Payment Reference — only if non-null and non-empty
+  // Reference (if present)
   if (input.payment_reference_number && input.payment_reference_number.trim() !== '') {
-    drawText(ctx, 'Payment Reference', RIGHT_LABEL_X, rightCursor, {
-      font,
-      size: 8,
-      color: COLOR_MEDIUM,
+    const refY = dateMethodY - 12;
+    page.drawText(`Reference: ${input.payment_reference_number.trim()}`, {
+      x: ML + 16, y: refY,
+      size: 7.5, font, color: C_LIGHT,
     });
-    rightCursor -= 11;
-    drawText(ctx, input.payment_reference_number.trim(), RIGHT_VALUE_X, rightCursor, {
-      font: fontBold,
-      size: 8.5,
-      color: COLOR_DARK,
-    });
-    rightCursor -= 13;
   }
 
-  // Advance main cursor past the taller of the two columns
-  ctx.cursor = Math.min(leftCursor, rightCursor);
+  y = HERO_CARD_Y - 12;
 
-  ctx.cursor -= 10;
-  checkOverflow(ctx, 1);
-  drawLine(ctx, MARGIN_LEFT, ctx.cursor, PAGE_WIDTH - MARGIN_RIGHT, ctx.cursor, 0.5, COLOR_DIVIDER);
-  ctx.cursor -= 16;
+  // ── 3. TWO SIDE-BY-SIDE INFO CARDS ────────────────────────────────────────
+  // LEFT — INVOICE card
+  // RIGHT — PAYMENT card
+  const INFO_CARD_H = 72;
+  const INFO_CARD_GAP = 10;
+  const INFO_CARD_W = (CW - INFO_CARD_GAP) / 2;
+  const INFO_CARD_Y = y - INFO_CARD_H;
 
-  // Suppress unused variable warnings
-  void COL_LEFT_WIDTH;
-  void COL_RIGHT_WIDTH;
+  const LEFT_CARD_X = ML;
+  const RIGHT_CARD_X = ML + INFO_CARD_W + INFO_CARD_GAP;
 
-  // ── BILLING / PAYER BLOCK ────────────────────────────────────────────────
+  // Draw both card backgrounds
+  page.drawRectangle({ x: LEFT_CARD_X, y: INFO_CARD_Y, width: INFO_CARD_W, height: INFO_CARD_H, color: C_CARD_BG2 });
+  page.drawRectangle({ x: RIGHT_CARD_X, y: INFO_CARD_Y, width: INFO_CARD_W, height: INFO_CARD_H, color: C_CARD_BG2 });
 
-  checkOverflow(ctx, 12);
-  drawText(ctx, 'BILLED TO', MARGIN_LEFT, ctx.cursor, {
-    font: fontBold,
-    size: 7.5,
-    color: COLOR_EB_GREEN_MED,
+  // LEFT card — INVOICE
+  const LC_INNER_X = LEFT_CARD_X + 12;
+  let lcY = INFO_CARD_Y + INFO_CARD_H - 14;
+
+  page.drawText('INVOICE', {
+    x: LC_INNER_X, y: lcY,
+    size: 7, font: fontBold, color: C_EB_GREEN_MED,
   });
-  ctx.cursor -= 13;
+  lcY -= 14;
 
-  // billing_name
+  page.drawText('Invoice Number', { x: LC_INNER_X, y: lcY, size: 7.5, font, color: C_MEDIUM });
+  lcY -= 11;
+  page.drawText(input.invoice_number, { x: LC_INNER_X, y: lcY, size: 8.5, font: fontBold, color: C_DARK });
+  lcY -= 14;
+
+  page.drawText('Invoice Date', { x: LC_INNER_X, y: lcY, size: 7.5, font, color: C_MEDIUM });
+  lcY -= 11;
+  page.drawText(formatTimestamp(input.invoice_issued_at), { x: LC_INNER_X, y: lcY, size: 8.5, font: fontBold, color: C_DARK });
+
+  // RIGHT card — PAYMENT
+  const RC_INNER_X = RIGHT_CARD_X + 12;
+  let rcY = INFO_CARD_Y + INFO_CARD_H - 14;
+
+  page.drawText('PAYMENT', {
+    x: RC_INNER_X, y: rcY,
+    size: 7, font: fontBold, color: C_EB_GREEN_MED,
+  });
+  rcY -= 14;
+
+  page.drawText('Received', { x: RC_INNER_X, y: rcY, size: 7.5, font, color: C_MEDIUM });
+  rcY -= 11;
+  page.drawText(formatTimestamp(input.payment_received_at), { x: RC_INNER_X, y: rcY, size: 8.5, font: fontBold, color: C_DARK });
+  rcY -= 14;
+
+  page.drawText('Method', { x: RC_INNER_X, y: rcY, size: 7.5, font, color: C_MEDIUM });
+  rcY -= 11;
+  page.drawText(formatPaymentMethod(input.payment_method), { x: RC_INNER_X, y: rcY, size: 8.5, font: fontBold, color: C_DARK });
+  rcY -= 14;
+
+  if (input.payment_reference_number && input.payment_reference_number.trim() !== '') {
+    page.drawText('Reference', { x: RC_INNER_X, y: rcY, size: 7.5, font, color: C_MEDIUM });
+    rcY -= 11;
+    page.drawText(input.payment_reference_number.trim(), { x: RC_INNER_X, y: rcY, size: 8.5, font: fontBold, color: C_DARK });
+  }
+
+  y = INFO_CARD_Y - 12;
+
+  // ── 4. BILLED TO CARD ─────────────────────────────────────────────────────
   const billingNameTrimmed = input.billing_name?.trim() ?? '';
   const billingContactTrimmed = input.billing_contact_name?.trim() ?? '';
 
-  if (billingNameTrimmed !== '') {
-    const nameLines = wrapText(billingNameTrimmed, fontBold, 9, CONTENT_WIDTH);
-    for (const line of nameLines) {
-      checkOverflow(ctx, 12);
-      drawText(ctx, line, MARGIN_LEFT, ctx.cursor, { font: fontBold, size: 9, color: COLOR_DARK });
-      ctx.cursor -= 12;
-    }
-  }
+  // Build billing lines
+  const billingLines: Array<{ text: string; bold: boolean }> = [];
 
-  // billing_contact_name — only if non-empty AND different from billing_name
-  // This deduplicates when billing_name and billing_contact_name are identical.
+  if (billingNameTrimmed !== '') {
+    billingLines.push({ text: billingNameTrimmed, bold: true });
+  }
   if (
     billingContactTrimmed !== '' &&
     billingContactTrimmed.toLowerCase() !== billingNameTrimmed.toLowerCase()
   ) {
-    const contactLines = wrapText(billingContactTrimmed, font, 8.5, CONTENT_WIDTH);
-    for (const line of contactLines) {
-      checkOverflow(ctx, 12);
-      drawText(ctx, line, MARGIN_LEFT, ctx.cursor, { font, size: 8.5, color: COLOR_DARK });
-      ctx.cursor -= 12;
-    }
+    billingLines.push({ text: billingContactTrimmed, bold: false });
   }
 
-  // Address lines
   const addrParts: string[] = [];
-  if (input.billing_address_line1 && input.billing_address_line1.trim()) {
-    addrParts.push(input.billing_address_line1.trim());
-  }
-  if (input.billing_address_line2 && input.billing_address_line2.trim()) {
-    addrParts.push(input.billing_address_line2.trim());
-  }
+  if (input.billing_address_line1?.trim()) addrParts.push(input.billing_address_line1.trim());
+  if (input.billing_address_line2?.trim()) addrParts.push(input.billing_address_line2.trim());
 
-  // City, State Postal
-  const cityStateParts: string[] = [];
-  if (input.billing_city && input.billing_city.trim()) cityStateParts.push(input.billing_city.trim());
-  if (input.billing_state && input.billing_state.trim()) {
-    if (input.billing_postal_code && input.billing_postal_code.trim()) {
-      cityStateParts.push(`${input.billing_state.trim()} ${input.billing_postal_code.trim()}`);
+  const csp: string[] = [];
+  if (input.billing_city?.trim()) csp.push(input.billing_city.trim());
+  if (input.billing_state?.trim()) {
+    if (input.billing_postal_code?.trim()) {
+      csp.push(`${input.billing_state.trim()} ${input.billing_postal_code.trim()}`);
     } else {
-      cityStateParts.push(input.billing_state.trim());
+      csp.push(input.billing_state.trim());
     }
-  } else if (input.billing_postal_code && input.billing_postal_code.trim()) {
-    cityStateParts.push(input.billing_postal_code.trim());
+  } else if (input.billing_postal_code?.trim()) {
+    csp.push(input.billing_postal_code.trim());
   }
-  if (cityStateParts.length > 0) addrParts.push(cityStateParts.join(', '));
+  if (csp.length > 0) addrParts.push(csp.join(', '));
+  if (input.billing_country?.trim()) addrParts.push(input.billing_country.trim());
 
-  if (input.billing_country && input.billing_country.trim()) {
-    addrParts.push(input.billing_country.trim());
+  for (const a of addrParts) {
+    billingLines.push({ text: a, bold: false });
   }
 
-  for (const addrLine of addrParts) {
-    const wrapped = wrapText(addrLine, font, 8.5, CONTENT_WIDTH);
-    for (const line of wrapped) {
-      checkOverflow(ctx, 12);
-      drawText(ctx, line, MARGIN_LEFT, ctx.cursor, { font, size: 8.5, color: COLOR_MEDIUM });
-      ctx.cursor -= 12;
+  const BILLED_LINE_H = 12;
+  const BILLED_INNER_PAD = 12;
+  const BILLED_CARD_H = BILLED_INNER_PAD + 14 + billingLines.length * BILLED_LINE_H + BILLED_INNER_PAD;
+  const BILLED_CARD_Y = y - BILLED_CARD_H;
+
+  page.drawRectangle({ x: ML, y: BILLED_CARD_Y, width: CW, height: BILLED_CARD_H, color: C_CARD_BG });
+
+  let btY = BILLED_CARD_Y + BILLED_CARD_H - BILLED_INNER_PAD;
+
+  page.drawText('BILLED TO', {
+    x: ML + BILLED_INNER_PAD, y: btY,
+    size: 7, font: fontBold, color: C_EB_GREEN_MED,
+  });
+  btY -= 14;
+
+  for (const line of billingLines) {
+    const wrappedLines = wrapText(line.text, line.bold ? fontBold : font, 8.5, CW - BILLED_INNER_PAD * 2);
+    for (const wl of wrappedLines) {
+      page.drawText(wl, {
+        x: ML + BILLED_INNER_PAD, y: btY,
+        size: 8.5,
+        font: line.bold ? fontBold : font,
+        color: line.bold ? C_DARK : C_MEDIUM,
+      });
+      btY -= BILLED_LINE_H;
     }
   }
 
-  ctx.cursor -= 8;
-  checkOverflow(ctx, 1);
-  drawLine(ctx, MARGIN_LEFT, ctx.cursor, PAGE_WIDTH - MARGIN_RIGHT, ctx.cursor, 0.5, COLOR_DIVIDER);
-  ctx.cursor -= 16;
+  y = BILLED_CARD_Y - 12;
 
-  // ── FINANCIAL SUMMARY ────────────────────────────────────────────────────
-  // Heading row: FINANCIAL SUMMARY (left)   ALL AMOUNTS {currency} (right)
-  // THIS PAYMENT focal block
-  // Compact rows: Invoice Total, Amount Paid After This Payment, Balance Remaining
+  // ── 5. ACCOUNT SUMMARY CARD ───────────────────────────────────────────────
+  // Rows: Invoice Total / This Payment / Total Paid / Balance Remaining
+  // Right-aligned monetary values
+  const SUMMARY_ROW_H = 18;
+  const SUMMARY_ROWS = 4;
+  const SUMMARY_INNER_PAD = 12;
+  const SUMMARY_CARD_H = SUMMARY_INNER_PAD + 14 + SUMMARY_ROWS * SUMMARY_ROW_H + SUMMARY_INNER_PAD;
+  const SUMMARY_CARD_Y = y - SUMMARY_CARD_H;
 
-  checkOverflow(ctx, 100);
+  page.drawRectangle({ x: ML, y: SUMMARY_CARD_Y, width: CW, height: SUMMARY_CARD_H, color: C_CARD_BG });
 
-  // Heading row
-  drawText(ctx, 'FINANCIAL SUMMARY', MARGIN_LEFT, ctx.cursor, {
-    font: fontBold,
-    size: 8,
-    color: COLOR_EB_GREEN_MED,
+  let smY = SUMMARY_CARD_Y + SUMMARY_CARD_H - SUMMARY_INNER_PAD;
+
+  // Heading
+  page.drawText('ACCOUNT SUMMARY', {
+    x: ML + SUMMARY_INNER_PAD, y: smY,
+    size: 7, font: fontBold, color: C_EB_GREEN_MED,
   });
+  smY -= 16;
 
-  const allAmountsLabel = `ALL AMOUNTS ${currency}`;
-  const allAmountsWidth = font.widthOfTextAtSize(allAmountsLabel, 7.5);
-  drawText(ctx, allAmountsLabel, PAGE_WIDTH - MARGIN_RIGHT - allAmountsWidth, ctx.cursor, {
-    font,
-    size: 7.5,
-    color: COLOR_MEDIUM,
-  });
-
-  ctx.cursor -= 14;
-
-  // THIS PAYMENT focal block — draw background box
-  const focalBoxHeight = 46;
-  const focalBoxY = ctx.cursor - focalBoxHeight;
-  drawRect(ctx, MARGIN_LEFT, focalBoxY, CONTENT_WIDTH, focalBoxHeight, COLOR_SUMMARY_BOX);
-
-  ctx.cursor -= 10;
-
-  // "THIS PAYMENT" label
-  drawText(ctx, 'THIS PAYMENT', MARGIN_LEFT + 12, ctx.cursor, {
-    font: fontBold,
-    size: 7.5,
-    color: COLOR_MEDIUM,
-  });
-
-  ctx.cursor -= 18;
-
-  // Payment amount — large bold, focal
-  const paymentAmountStr = formatMoney(input.payment_amount_cents, currency);
-  const paymentAmountWidth = fontBold.widthOfTextAtSize(paymentAmountStr, 18);
-  drawText(ctx, paymentAmountStr, MARGIN_LEFT + 12, ctx.cursor, {
-    font: fontBold,
-    size: 18,
-    color: COLOR_EB_GREEN,
-  });
-  void paymentAmountWidth;
-
-  ctx.cursor -= 8;
-  ctx.cursor = focalBoxY - 12;
-
-  // Compact summary rows
-  const summaryRowH = 16;
-
-  function drawCompactRow(
+  // Helper: draw a summary row
+  function drawSummaryRow(
     label: string,
     value: string,
-    labelFont: PDFFont,
-    valueFont: PDFFont,
-    labelColor: ReturnType<typeof rgb>,
-    valueColor: ReturnType<typeof rgb>,
+    labelFnt: PDFFont,
+    valueFnt: PDFFont,
+    labelClr: ReturnType<typeof rgb>,
+    valueClr: ReturnType<typeof rgb>,
+    rowBg?: ReturnType<typeof rgb>,
   ): void {
-    checkOverflow(ctx, summaryRowH);
-    drawText(ctx, label, MARGIN_LEFT + 10, ctx.cursor, {
-      font: labelFont,
-      size: 8.5,
-      color: labelColor,
+    if (rowBg) {
+      page.drawRectangle({
+        x: ML + 4, y: smY - 4,
+        width: CW - 8, height: SUMMARY_ROW_H,
+        color: rowBg,
+      });
+    }
+    page.drawText(label, {
+      x: ML + SUMMARY_INNER_PAD, y: smY,
+      size: 8.5, font: labelFnt, color: labelClr,
     });
-    const vw = valueFont.widthOfTextAtSize(value, 8.5);
-    drawText(ctx, value, PAGE_WIDTH - MARGIN_RIGHT - 10 - vw, ctx.cursor, {
-      font: valueFont,
-      size: 8.5,
-      color: valueColor,
+    const vw = valueFnt.widthOfTextAtSize(value, 8.5);
+    page.drawText(value, {
+      x: ML + CW - SUMMARY_INNER_PAD - vw, y: smY,
+      size: 8.5, font: valueFnt, color: valueClr,
     });
-    ctx.cursor -= summaryRowH;
+    smY -= SUMMARY_ROW_H;
   }
 
-  drawCompactRow(
+  // Invoice Total
+  drawSummaryRow(
     'Invoice Total',
     formatMoney(input.invoice_total_cents, currency),
     font, font,
-    COLOR_MEDIUM, COLOR_DARK,
+    C_MEDIUM, C_DARK,
   );
 
-  drawCompactRow(
-    'Amount Paid After This Payment',
+  // This Payment — slightly emphasized
+  drawSummaryRow(
+    'This Payment',
+    formatMoney(input.payment_amount_cents, currency),
+    fontBold, fontBold,
+    C_DARK, C_EB_GREEN,
+    C_CARD_BG2,
+  );
+
+  // Total Paid
+  drawSummaryRow(
+    'Total Paid',
     formatMoney(input.amount_paid_after_cents, currency),
     font, font,
-    COLOR_MEDIUM, COLOR_DARK,
+    C_MEDIUM, C_DARK,
   );
 
-  const isPaidInFull = input.balance_remaining_after_cents === 0;
-
-  drawCompactRow(
+  // Balance Remaining — strongest row
+  const balanceValueColor = isPaidInFull ? C_EB_GREEN_MED : C_DARK;
+  drawSummaryRow(
     'Balance Remaining',
     formatMoney(input.balance_remaining_after_cents, currency),
-    font,
-    fontBold,
-    COLOR_MEDIUM,
-    isPaidInFull ? COLOR_EB_GREEN_MED : COLOR_DARK,
+    fontBold, fontBold,
+    C_DARK, balanceValueColor,
   );
 
-  ctx.cursor -= 14;
-
-  // ── CONFIRMATION SENTENCE ────────────────────────────────────────────────
-  // One sentence only, directly below financial summary.
-
-  checkOverflow(ctx, 24);
-
-  let confirmationText: string;
+  // PAID IN FULL treatment when balance is $0.00
   if (isPaidInFull) {
-    confirmationText =
-      'This receipt confirms the payment shown above was received and applied to ' + 'the referenced invoice. The invoice balance is now $0.00.';
+    const pifLabel = 'PAID IN FULL';
+    const pifLabelW = fontBold.widthOfTextAtSize(pifLabel, 7);
+    const pifPadX = 6;
+    const pifBadgeW = pifLabelW + pifPadX * 2;
+    const pifBadgeH = 12;
+    const pifBadgeX = ML + CW - SUMMARY_INNER_PAD - pifBadgeW;
+    const pifBadgeY = smY + 2;
+
+    page.drawRectangle({
+      x: pifBadgeX, y: pifBadgeY,
+      width: pifBadgeW, height: pifBadgeH,
+      color: C_EB_GREEN_LT,
+    });
+    page.drawText(pifLabel, {
+      x: pifBadgeX + pifPadX, y: pifBadgeY + 3,
+      size: 7, font: fontBold, color: C_EB_GREEN_MED,
+    });
+    smY -= 14;
+  }
+
+  y = SUMMARY_CARD_Y - 14;
+
+  // ── 6. CONFIRMATION ───────────────────────────────────────────────────────
+  let confirmText: string;
+  if (isPaidInFull) {
+    confirmText =
+      `Payment received and applied to invoice ${input.invoice_number}. ` +
+      'This invoice is paid in full.';
   } else {
-    const balanceStr = formatMoney(input.balance_remaining_after_cents, currency);
-    confirmationText =
-      'This receipt confirms the payment shown above was received and applied to ' +
-      `the referenced invoice. A balance of ${balanceStr} remains.`;
+    const balStr = formatMoney(input.balance_remaining_after_cents, currency);
+    confirmText =
+      `Payment received and applied to invoice ${input.invoice_number}. ` +
+      `Remaining balance: ${balStr}.`;
   }
 
-  const confirmLines = wrapText(confirmationText, font, 8, CONTENT_WIDTH);
+  const confirmLines = wrapText(confirmText, font, 8, CW);
   for (const line of confirmLines) {
-    checkOverflow(ctx, 12);
-    drawText(ctx, line, MARGIN_LEFT, ctx.cursor, { font, size: 8, color: COLOR_MEDIUM });
-    ctx.cursor -= 12;
+    page.drawText(line, {
+      x: ML, y,
+      size: 8, font, color: C_MEDIUM,
+    });
+    y -= 12;
   }
 
-  // ── FOOTER ───────────────────────────────────────────────────────────────
-  // Minimal: subtle rule + "EarnestBridge  ·  Payment Receipt · {receipt_number}"
-  // No duplicate confirmation language.
+  // ── 7. FOOTER ─────────────────────────────────────────────────────────────
+  const FOOTER_Y = SAFE_BOT + 14;
 
-  const FOOTER_Y = SAFE_BOTTOM_MARGIN + 16;
-
-  // Footer rule
-  drawLine(ctx, MARGIN_LEFT, FOOTER_Y + 12, PAGE_WIDTH - MARGIN_RIGHT, FOOTER_Y + 12, 0.5, COLOR_DIVIDER);
-
-  // Footer text — centered
-  const footerStr = `EarnestBridge  ·  Payment Receipt · ${input.receipt_number}`;
-  const footerWidth = font.widthOfTextAtSize(footerStr, 7.5);
-  const footerX = MARGIN_LEFT + (CONTENT_WIDTH - footerWidth) / 2;
-  drawText(ctx, footerStr, footerX, FOOTER_Y, {
-    font,
-    size: 7.5,
-    color: COLOR_LIGHT,
+  page.drawLine({
+    start: { x: ML, y: FOOTER_Y + 14 },
+    end: { x: PAGE_W - MR, y: FOOTER_Y + 14 },
+    thickness: 0.5,
+    color: C_DIVIDER,
   });
 
-  // 6. Save with deterministic metadata already set above
+  const footerStr = `EarnestBridge  \u00b7  Payment Receipt  \u00b7  ${input.receipt_number}`;
+  const footerW = font.widthOfTextAtSize(footerStr, 7.5);
+  const footerX = ML + (CW - footerW) / 2;
+  page.drawText(footerStr, {
+    x: footerX, y: FOOTER_Y,
+    size: 7.5, font, color: C_LIGHT,
+  });
+
+  // Serialize
   let pdfBytes: Uint8Array;
   try {
     pdfBytes = await pdfDoc.save();
