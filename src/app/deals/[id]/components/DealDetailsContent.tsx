@@ -61,6 +61,12 @@ interface BorrowerDoc {
 
 // ─── Portal Invoice Types ─────────────────────────────────────────────────────
 
+interface PortalReceipt {
+  payment_id: string;
+  receipt_number: string;
+  receipt_pdf_generated_at: string;
+}
+
 interface PortalInvoice {
   id: string;
   invoice_number: string;
@@ -73,6 +79,8 @@ interface PortalInvoice {
   // Payment aggregate fields — server-computed, no payment detail exposed.
   amount_paid_cents: number;
   balance_remaining_cents: number;
+  // Minimal completed-receipt metadata (display only; never used to authorize).
+  receipts?: PortalReceipt[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1009,6 +1017,21 @@ export default function DealDetailsContent() {
                       <Icon name="ArrowDownTrayIcon" size={12} />
                       Download PDF
                     </a>
+                    {/* Download Receipt — one link per completed receipt */}
+                    {(invoice.receipts ?? []).map((receipt) => (
+                      <a
+                        key={receipt.payment_id}
+                        href={`/api/portal/invoices/${invoice.id}/payment/${receipt.payment_id}/receipt?disposition=attachment`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white text-eb-green-900 text-xs font-display font-700 rounded-lg border border-eb-green-200 hover:bg-eb-green-50 transition-colors"
+                      >
+                        <Icon name="ArrowDownTrayIcon" size={12} />
+                        {(invoice.receipts ?? []).length === 1
+                          ? 'Download Receipt'
+                          : `Download Receipt ${receipt.receipt_number}`}
+                      </a>
+                    ))}
                   </div>
                 </div>
               ))}

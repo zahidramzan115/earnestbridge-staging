@@ -70,9 +70,20 @@ function getServiceClient() {
 //   service role information, raw Supabase errors.
 //
 // Payment fields that must NEVER be returned:
-//   payment id, idempotency_key, recorded_by, reference_number, notes,
-//   provider, provider_payment_id, receipt fields, bank/wire fields,
-//   timestamps, Admin identity. Only aggregate cents values are added.
+//   idempotency_key, recorded_by, reference_number, notes,
+//   provider, provider_payment_id, bank/wire fields,
+//   timestamps, Admin identity, receipt_issued_at, receipt_pdf_storage_path,
+//   receipt_pdf_hash, email delivery fields.
+//   Only aggregate cents values plus the narrow `receipts` projection
+//   { payment_id, receipt_number, receipt_pdf_generated_at } are added.
+//   A receipt is included ONLY when status='received' AND all five receipt
+//   completion fields are non-null (verified server-side).
+
+interface SafeReceipt {
+  payment_id: string;
+  receipt_number: string;
+  receipt_pdf_generated_at: string;
+}
 
 interface SafeInvoice {
   id: string;
@@ -84,9 +95,10 @@ interface SafeInvoice {
   currency: string;
   is_revision: boolean;
   // Payment aggregate fields — server-computed from received payments only.
-  // No payment row detail is ever exposed.
   amount_paid_cents: number;
   balance_remaining_cents: number;
+  // Minimal, complete-receipt-only metadata for the Download Receipt link.
+  receipts: SafeReceipt[];
 }
 
 // ── GET /api/portal/deals/[dealId]/invoices ───────────────────────────────────
@@ -261,13 +273,19 @@ export async function GET(
 
   // Build aggregate map: invoice_id → total amount_paid_cents
   const paidMap = new Map<string, number>();
+  // Build receipts map: invoice_id → eligible complete receipts
+  const receiptsMap = new Map<string, SafeReceipt[]>();
 
   if (invoiceIds.length > 0) {
     const { data: paymentRows, error: paymentsError } = await supabase
       .from('crm_payments')
-      .select('invoice_id, amount_cents')
+      .select(
+        'id, invoice_id, amount_cents, receipt_number, receipt_issued_at, receipt_pdf_storage_path, receipt_pdf_generated_at, receipt_pdf_hash'
+      )
       .in('invoice_id', invoiceIds)
-      .eq('status', 'received');
+      .eq('status', 'received')
+      .order('receipt_pdf_generated_at', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true });
 
     if (paymentsError) {
       // Payment query failed — fail closed.
@@ -286,6 +304,24 @@ export async function GET(
     for (const row of paymentRows ?? []) {
       const prev = paidMap.get(row.invoice_id) ?? 0;
       paidMap.set(row.invoice_id, prev + row.amount_cents);
+
+      // Receipt eligibility: ALL FIVE completion fields must be non-null.
+      // Only the three safe fields are projected into the response.
+      if (
+        row.receipt_number &&
+        row.receipt_issued_at &&
+        row.receipt_pdf_storage_path &&
+        row.receipt_pdf_generated_at &&
+        row.receipt_pdf_hash
+      ) {
+        const list = receiptsMap.get(row.invoice_id) ?? [];
+        list.push({
+          payment_id: row.id,
+          receipt_number: row.receipt_number,
+          receipt_pdf_generated_at: row.receipt_pdf_generated_at,
+        });
+        receiptsMap.set(row.invoice_id, list);
+      }
     }
   }
 
@@ -320,6 +356,7 @@ export async function GET(
       // Payment aggregates — server-computed, no payment detail exposed
       amount_paid_cents: amountPaidCents,
       balance_remaining_cents: balanceRemainingCents,
+      receipts: receiptsMap.get(inv.id) ?? [],
     };
   });
 
