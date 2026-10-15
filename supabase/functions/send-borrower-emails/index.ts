@@ -100,7 +100,7 @@ serve(async (req) => {
     if (!emailType) {
       throw new Error("Missing required field: emailType");
     }
-    if (!isAdminEmail && emailType !== "invoice_issued" && !borrower?.email) {
+    if (!isAdminEmail && emailType !== "invoice_issued" && emailType !== "receipt_issued" && !borrower?.email) {
       throw new Error("Missing required field: borrower.email");
     }
 
@@ -1598,6 +1598,417 @@ serve(async (req) => {
       (body as any)._invoiceAttachment = { filename: expectedFilename, content: att.content };
     }
 
+    // ─── EMAIL TYPE: Receipt Issued ───────────────────────────────────────────
+    // TRUST BOUNDARY: Requires BOTH service-role Bearer authorization (enforced
+    // by Supabase Edge Function invocation) AND the X-EB-Email-Secret internal
+    // secret — identical to invoice_issued / admin_direct_message.
+    //
+    // This handler ONLY validates the payload, renders deterministic content,
+    // forwards the already-verified immutable receipt PDF, and sends through
+    // Resend using the caller-supplied idempotency key. It does NOT decode or
+    // re-render the PDF, derive a second idempotency key, or touch any database.
+    else if (emailType === "receipt_issued") {
+      // ── INTERNAL-SECRET GATE ──────────────────────────────────────────────
+      if (!checkInternalSecret(req)) {
+        return new Response(
+          JSON.stringify({ error: "Forbidden" }),
+          {
+            status: 403,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
+        );
+      }
+      // ── END INTERNAL-SECRET GATE ──────────────────────────────────────────
+
+      const rcIsNonblank = (v: unknown): v is string =>
+        typeof v === "string" && v.trim().length > 0;
+
+      const rcValidationError = (msg: string): Response =>
+        new Response(
+          JSON.stringify({ success: false, error: msg }),
+          {
+            status: 400,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
+        );
+
+      const rcIsNonNegInt = (v: unknown): v is number =>
+        typeof v === "number" && Number.isInteger(v) && v >= 0;
+
+      const rcUuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      // ── Field extraction (names exactly as emitted by receiptEmail.ts) ────
+      const rcTo: unknown = body?.to;
+      const rcPaymentId: unknown = body?.paymentId;
+      const rcInvoiceId: unknown = body?.invoiceId;
+      const rcInvoiceNumber: unknown = body?.invoiceNumber;
+      const rcReceiptNumber: unknown = body?.receiptNumber;
+      const rcReceiptIssuedAt: unknown = body?.receiptIssuedAt;
+      const rcPaymentAmountCents: unknown = body?.paymentAmountCents;
+      const rcCurrency: unknown = body?.currency;
+      const rcPaymentReceivedAt: unknown = body?.paymentReceivedAt;
+      const rcPaymentMethod: unknown = body?.paymentMethod;
+      const rcPaymentReference: unknown = body?.paymentReference;
+      const rcInvoiceTotalCents: unknown = body?.invoiceTotalCents;
+      const rcAmountPaidAfterCents: unknown = body?.amountPaidAfterCents;
+      const rcBalanceRemainingAfterCents: unknown = body?.balanceRemainingAfterCents;
+      const rcBillingContactName: unknown = body?.billingContactName;
+      const rcIdempotencyKey: unknown = body?.idempotencyKey;
+      const rcAttachments: unknown = body?.attachments;
+
+      // to
+      if (!rcIsNonblank(rcTo)) {
+        return rcValidationError("receipt_issued: 'to' must be a nonblank string");
+      }
+      const rcToTrimmed = rcTo.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rcToTrimmed)) {
+        return rcValidationError("receipt_issued: 'to' must be a valid email address");
+      }
+
+      // paymentId
+      if (!rcIsNonblank(rcPaymentId) || !rcUuidRe.test(rcPaymentId.trim())) {
+        return rcValidationError("receipt_issued: 'paymentId' must be a valid UUID");
+      }
+      const rcPaymentIdTrimmed = rcPaymentId.trim();
+
+      // invoiceId
+      if (!rcIsNonblank(rcInvoiceId) || !rcUuidRe.test(rcInvoiceId.trim())) {
+        return rcValidationError("receipt_issued: 'invoiceId' must be a valid UUID");
+      }
+
+      // invoiceNumber
+      if (!rcIsNonblank(rcInvoiceNumber)) {
+        return rcValidationError("receipt_issued: 'invoiceNumber' must be a nonblank string");
+      }
+      const rcInvoiceNumberTrimmed = rcInvoiceNumber.trim();
+      if (rcInvoiceNumberTrimmed.length > 100) {
+        return rcValidationError("receipt_issued: 'invoiceNumber' exceeds maximum length");
+      }
+
+      // receiptNumber
+      if (!rcIsNonblank(rcReceiptNumber)) {
+        return rcValidationError("receipt_issued: 'receiptNumber' must be a nonblank string");
+      }
+      const rcReceiptNumberTrimmed = rcReceiptNumber.trim();
+      if (rcReceiptNumberTrimmed.length > 100) {
+        return rcValidationError("receipt_issued: 'receiptNumber' exceeds maximum length");
+      }
+      if (!/^[A-Za-z0-9._-]+$/.test(rcReceiptNumberTrimmed)) {
+        return rcValidationError("receipt_issued: 'receiptNumber' contains unsupported characters");
+      }
+
+      // receiptIssuedAt / paymentReceivedAt — nonblank, parseable timestamps
+      if (!rcIsNonblank(rcReceiptIssuedAt) || isNaN(new Date(rcReceiptIssuedAt.trim()).getTime())) {
+        return rcValidationError("receipt_issued: 'receiptIssuedAt' must be a valid timestamp");
+      }
+      const rcReceiptIssuedAtDate = new Date(rcReceiptIssuedAt.trim());
+      if (!rcIsNonblank(rcPaymentReceivedAt) || isNaN(new Date(rcPaymentReceivedAt.trim()).getTime())) {
+        return rcValidationError("receipt_issued: 'paymentReceivedAt' must be a valid timestamp");
+      }
+      const rcPaymentReceivedAtDate = new Date(rcPaymentReceivedAt.trim());
+
+      // money integers
+      if (!rcIsNonNegInt(rcPaymentAmountCents)) {
+        return rcValidationError("receipt_issued: 'paymentAmountCents' must be a non-negative integer");
+      }
+      if (!rcIsNonNegInt(rcInvoiceTotalCents)) {
+        return rcValidationError("receipt_issued: 'invoiceTotalCents' must be a non-negative integer");
+      }
+      if (!rcIsNonNegInt(rcAmountPaidAfterCents)) {
+        return rcValidationError("receipt_issued: 'amountPaidAfterCents' must be a non-negative integer");
+      }
+      if (!rcIsNonNegInt(rcBalanceRemainingAfterCents)) {
+        return rcValidationError("receipt_issued: 'balanceRemainingAfterCents' must be a non-negative integer");
+      }
+
+      // currency — same rule as invoice_issued (3 alphabetic characters)
+      if (!rcIsNonblank(rcCurrency)) {
+        return rcValidationError("receipt_issued: 'currency' must be a nonblank string");
+      }
+      const rcCurrencyTrimmed = rcCurrency.trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(rcCurrencyTrimmed)) {
+        return rcValidationError("receipt_issued: 'currency' must be exactly 3 alphabetic characters");
+      }
+
+      // paymentMethod
+      if (!rcIsNonblank(rcPaymentMethod)) {
+        return rcValidationError("receipt_issued: 'paymentMethod' must be a nonblank string");
+      }
+      const rcPaymentMethodTrimmed = rcPaymentMethod.trim();
+      if (rcPaymentMethodTrimmed.length > 100) {
+        return rcValidationError("receipt_issued: 'paymentMethod' exceeds maximum length");
+      }
+
+      // paymentReference — optional
+      let rcPaymentReferenceTrimmed: string | null = null;
+      if (rcPaymentReference !== null && rcPaymentReference !== undefined) {
+        if (typeof rcPaymentReference !== "string") {
+          return rcValidationError("receipt_issued: 'paymentReference' must be a string or null");
+        }
+        const t = rcPaymentReference.trim();
+        rcPaymentReferenceTrimmed = t.length > 0 ? t.substring(0, 200) : null;
+      }
+
+      // billingContactName — optional
+      let rcBillingContactNameTrimmed: string | null = null;
+      if (rcBillingContactName !== null && rcBillingContactName !== undefined) {
+        if (typeof rcBillingContactName !== "string") {
+          return rcValidationError("receipt_issued: 'billingContactName' must be a string or null");
+        }
+        const t = rcBillingContactName.trim();
+        rcBillingContactNameTrimmed = t.length > 0 ? t.substring(0, 200) : null;
+      }
+
+      // idempotencyKey — nonblank, <= 256 chars. Passed through unchanged; the
+      // database dispatcher owns the canonical key (receipt-email/{payment_id}).
+      if (!rcIsNonblank(rcIdempotencyKey)) {
+        return rcValidationError("receipt_issued: 'idempotencyKey' must be a nonblank string");
+      }
+      const rcIdempotencyKeyTrimmed = rcIdempotencyKey.trim();
+      if (rcIdempotencyKeyTrimmed.length > 256) {
+        return rcValidationError("receipt_issued: 'idempotencyKey' exceeds 256 characters");
+      }
+      if (rcIdempotencyKeyTrimmed !== `receipt-email/${rcPaymentIdTrimmed}`) {
+        return rcValidationError("receipt_issued: 'idempotencyKey' must equal 'receipt-email/{paymentId}'");
+      }
+
+      // attachments — exactly one receipt PDF
+      if (!Array.isArray(rcAttachments) || rcAttachments.length !== 1) {
+        return rcValidationError("receipt_issued: 'attachments' must be an array with exactly 1 item");
+      }
+      const rcAtt = rcAttachments[0];
+      const rcExpectedFilename = `EarnestBridge-Receipt-${rcReceiptNumberTrimmed}.pdf`;
+      if (!rcAtt || typeof rcAtt.filename !== "string" || rcAtt.filename !== rcExpectedFilename) {
+        return rcValidationError(
+          `receipt_issued: attachment filename must exactly equal '${rcExpectedFilename}'`
+        );
+      }
+      if (!rcIsNonblank(rcAtt.content)) {
+        return rcValidationError("receipt_issued: attachment content must be a nonblank base64 string");
+      }
+      // Structural base64 check only — the PDF is forwarded unmodified. Do NOT log content.
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(rcAtt.content.trim())) {
+        return rcValidationError("receipt_issued: attachment content is not valid base64");
+      }
+      // ── END VALIDATION ────────────────────────────────────────────────────
+
+      // ── Deterministic formatting (supplied values only; no runtime date) ──
+      const rcMoney = (cents: number): string =>
+        new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: rcCurrencyTrimmed,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(cents / 100);
+
+      const rcMonthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+      ];
+      // Fixed US Eastern-independent presentation: calendar date in UTC
+      // so output is deterministic regardless of runtime timezone.
+      const rcDate = (d: Date): string =>
+        `${rcMonthNames[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+
+      const rcMethodLabels: Record<string, string> = {
+        bank_wire: "Bank Wire",
+        wire: "Bank Wire",
+        ach: "ACH",
+        check: "Check",
+        cheque: "Check",
+        card: "Card",
+        credit_card: "Credit Card",
+        cash: "Cash",
+        other: "Other",
+      };
+      const rcFormatMethod = (raw: string): string => {
+        const key = raw.trim().toLowerCase();
+        if (rcMethodLabels[key]) return rcMethodLabels[key];
+        const words = key
+          .replace(/[^a-z0-9]+/g, " ")
+          .trim()
+          .split(" ")
+          .filter((w) => w.length > 0);
+        if (words.length === 0) return "Other";
+        return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+      };
+
+      const rcPaymentAmountFmt = rcMoney(rcPaymentAmountCents);
+      const rcInvoiceTotalFmt = rcMoney(rcInvoiceTotalCents);
+      const rcAmountPaidFmt = rcMoney(rcAmountPaidAfterCents);
+      const rcBalanceFmt = rcMoney(rcBalanceRemainingAfterCents);
+      const rcPaymentDateFmt = rcDate(rcPaymentReceivedAtDate);
+      const rcReceiptDateFmt = rcDate(rcReceiptIssuedAtDate);
+      const rcMethodFmt = rcFormatMethod(rcPaymentMethodTrimmed);
+      const rcPaidInFull = rcBalanceRemainingAfterCents === 0;
+
+      // ── HTML-escaped display values (canonical values remain unescaped) ───
+      const rcSafeInvoiceNumber = escapeHtmlForInvoice(rcInvoiceNumberTrimmed);
+      const rcSafeReceiptNumber = escapeHtmlForInvoice(rcReceiptNumberTrimmed);
+      const rcSafeMethod = escapeHtmlForInvoice(rcMethodFmt);
+      const rcSafeReference = rcPaymentReferenceTrimmed !== null
+        ? escapeHtmlForInvoice(rcPaymentReferenceTrimmed)
+        : null;
+      const rcGreeting = rcBillingContactNameTrimmed
+        ? `Hi ${escapeHtmlForInvoice(rcBillingContactNameTrimmed)},`
+        : "Hello,";
+
+      // ── Deterministic subject ─────────────────────────────────────────────
+      subject = `Payment Receipt — ${rcInvoiceNumberTrimmed} — ${rcReceiptNumberTrimmed}`;
+
+      const rcRowLabel = "padding: 9px 0; color: #6b7280; width: 45%; font-size: 14px;";
+      const rcRowValue = "padding: 9px 0; font-weight: 700; font-size: 14px; color: #111827;";
+      const rcRowBorder = "border-top: 1px solid #d1fae5;";
+
+      const rcStatusLine = rcPaidInFull
+        ? "This invoice is paid in full."
+        : `Remaining balance: ${rcBalanceFmt}.`;
+
+      const rcBalanceBlock = rcPaidInFull
+        ? `<tr>
+             <td style="${rcRowLabel} ${rcRowBorder}">Balance Remaining</td>
+             <td style="${rcRowValue} ${rcRowBorder}">
+               <span style="display: inline-block; background: #1B4332; color: #ffffff; font-size: 12px; font-weight: 800; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 4px;">PAID IN FULL</span>
+             </td>
+           </tr>`
+        : `<tr>
+             <td style="${rcRowLabel} ${rcRowBorder}">Balance Remaining</td>
+             <td style="${rcRowValue} ${rcRowBorder} color: #92400e;">${rcBalanceFmt}</td>
+           </tr>`;
+
+      toEmail = [rcToTrimmed];
+      htmlBody = `
+        <div style="${baseStyle}">
+          ${brandedHeader}
+          <div style="${bodyStyle}">
+            <h2 style="color: #1B4332; margin-top: 0; font-size: 20px;">Payment Received</h2>
+            <p style="color: #374151; line-height: 1.7;">${rcGreeting}</p>
+            <p style="color: #374151; line-height: 1.7;">
+              We received your payment of <strong>${rcPaymentAmountFmt}</strong> for invoice
+              <strong>${rcSafeInvoiceNumber}</strong>.
+            </p>
+
+            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 28px 0;">
+              <h3 style="color: #1B4332; margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em;">Payment Details</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="${rcRowLabel}">Payment Amount</td>
+                  <td style="${rcRowValue} font-size: 16px; color: #1B4332;">${rcPaymentAmountFmt}</td>
+                </tr>
+                <tr>
+                  <td style="${rcRowLabel} ${rcRowBorder}">Payment Date</td>
+                  <td style="${rcRowValue} ${rcRowBorder}">${rcPaymentDateFmt}</td>
+                </tr>
+                <tr>
+                  <td style="${rcRowLabel} ${rcRowBorder}">Payment Method</td>
+                  <td style="${rcRowValue} ${rcRowBorder}">${rcSafeMethod}</td>
+                </tr>
+                ${rcSafeReference !== null ? `<tr>
+                  <td style="${rcRowLabel} ${rcRowBorder}">Reference</td>
+                  <td style="${rcRowValue} ${rcRowBorder}">${rcSafeReference}</td>
+                </tr>` : ""}
+                <tr>
+                  <td style="${rcRowLabel} ${rcRowBorder}">Invoice</td>
+                  <td style="${rcRowValue} ${rcRowBorder}">${rcSafeInvoiceNumber}</td>
+                </tr>
+                <tr>
+                  <td style="${rcRowLabel} ${rcRowBorder}">Receipt</td>
+                  <td style="${rcRowValue} ${rcRowBorder}">${rcSafeReceiptNumber}</td>
+                </tr>
+                <tr>
+                  <td style="${rcRowLabel} ${rcRowBorder}">Receipt Date</td>
+                  <td style="${rcRowValue} ${rcRowBorder}">${rcReceiptDateFmt}</td>
+                </tr>
+              </table>
+            </div>
+
+            <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 20px 0;">
+              <h3 style="color: #374151; margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em;">Account Summary</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="${rcRowLabel}">Invoice Total</td>
+                  <td style="${rcRowValue}">${rcInvoiceTotalFmt}</td>
+                </tr>
+                <tr>
+                  <td style="${rcRowLabel} border-top: 1px solid #e5e7eb;">This Payment</td>
+                  <td style="${rcRowValue} border-top: 1px solid #e5e7eb;">${rcPaymentAmountFmt}</td>
+                </tr>
+                <tr>
+                  <td style="${rcRowLabel} border-top: 1px solid #e5e7eb;">Total Paid</td>
+                  <td style="${rcRowValue} border-top: 1px solid #e5e7eb;">${rcAmountPaidFmt}</td>
+                </tr>
+                ${rcBalanceBlock}
+              </table>
+            </div>
+
+            <p style="color: #374151; line-height: 1.7;">
+              Payment received and applied to invoice ${rcSafeInvoiceNumber}.
+              ${rcStatusLine}
+            </p>
+            <p style="color: #374151; line-height: 1.7;">
+              Your payment receipt is attached for your records.
+            </p>
+
+            <p style="margin-top: 28px; color: #374151;">
+              Thank you,<br/><strong>EarnestBridge</strong>
+            </p>
+
+            <div style="${invoiceFooterStyle}">
+              <p style="margin: 0 0 6px;"><strong style="color: #6b7280;">EarnestBridge</strong></p>
+              <p style="margin: 0;">Payment Receipt · ${rcSafeReceiptNumber}</p>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // ── Plain-text fallback (same essential information) ──────────────────
+      const rcTextLines: string[] = [
+        "Payment Received",
+        "",
+        rcBillingContactNameTrimmed ? `Hi ${rcBillingContactNameTrimmed},` : "Hello,",
+        "",
+        `We received your payment of ${rcPaymentAmountFmt} for invoice ${rcInvoiceNumberTrimmed}.`,
+        "",
+        "Payment Details",
+        `Payment Amount: ${rcPaymentAmountFmt}`,
+        `Payment Date: ${rcPaymentDateFmt}`,
+        `Payment Method: ${rcMethodFmt}`,
+      ];
+      if (rcPaymentReferenceTrimmed !== null) {
+        rcTextLines.push(`Reference: ${rcPaymentReferenceTrimmed}`);
+      }
+      rcTextLines.push(
+        `Invoice: ${rcInvoiceNumberTrimmed}`,
+        `Receipt: ${rcReceiptNumberTrimmed}`,
+        `Receipt Date: ${rcReceiptDateFmt}`,
+        "",
+        "Account Summary",
+        `Invoice Total: ${rcInvoiceTotalFmt}`,
+        `This Payment: ${rcPaymentAmountFmt}`,
+        `Total Paid: ${rcAmountPaidFmt}`,
+        rcPaidInFull ? "Balance Remaining: PAID IN FULL" : `Balance Remaining: ${rcBalanceFmt}`,
+        "",
+        `Payment received and applied to invoice ${rcInvoiceNumberTrimmed}. ${rcStatusLine}`,
+        "",
+        "Your payment receipt is attached for your records.",
+        "",
+        "Thank you,",
+        "EarnestBridge",
+        `Payment Receipt · ${rcReceiptNumberTrimmed}`
+      );
+      (body as any)._receiptText = rcTextLines.join("\n");
+
+      // ── Internal markers for the shared Resend section (never logged) ─────
+      (body as any)._receiptIdempotencyKey = rcIdempotencyKeyTrimmed;
+      (body as any)._receiptAttachment = { filename: rcExpectedFilename, content: rcAtt.content };
+    }
+
     else {
       throw new Error(`Unknown emailType: ${emailType}`);
     }
@@ -1613,6 +2024,10 @@ serve(async (req) => {
       subject,
       html: htmlBody,
     };
+
+    if (emailType === "receipt_issued") {
+      resendPayload.text = (body as any)._receiptText as string;
+    }
 
     if (emailType === "admin_direct_message" && (body as any)?._resolvedReplyTo) {
       resendPayload.reply_to = (body as any)._resolvedReplyTo;
@@ -1661,6 +2076,15 @@ serve(async (req) => {
       ];
     }
 
+    // ── Attach exactly one immutable receipt PDF for receipt_issued ───────
+    // Forwarded unmodified — never decoded, re-rendered, or altered here.
+    if (emailType === "receipt_issued") {
+      const receiptAttachment = (body as any)._receiptAttachment;
+      resendPayload.attachments = [
+        { filename: receiptAttachment.filename, content: receiptAttachment.content },
+      ];
+    }
+
     // ─── Build Resend request headers ─────────────────────────────────────────
     // For invoice_issued ONLY: add the Idempotency-Key header to the Resend POST.
     // This header is NOT added to any other email type.
@@ -1671,6 +2095,11 @@ serve(async (req) => {
     };
     if (emailType === "invoice_issued") {
       resendHeaders["Idempotency-Key"] = (body as any)._invoiceIdempotencyKey as string;
+    }
+    // receipt_issued: same mechanism, using the caller-supplied canonical key
+    // (receipt-email/{paymentId}) validated above. No second key is derived.
+    if (emailType === "receipt_issued") {
+      resendHeaders["Idempotency-Key"] = (body as any)._receiptIdempotencyKey as string;
     }
 
     // ─── Send via Resend ───────────────────────────────────────────────────────
@@ -1684,12 +2113,12 @@ serve(async (req) => {
     } catch (fetchError: unknown) {
       // ── Network/fetch exception — uncertain outcome for invoice_issued ────
       // We cannot prove whether Resend accepted the message.
-      if (emailType === "invoice_issued") {
+      if (emailType === "invoice_issued" || emailType === "receipt_issued") {
         const errMsg = fetchError instanceof Error ? fetchError.message : "Network error calling Resend";
         return new Response(
           JSON.stringify({
             success: false,
-            emailType: "invoice_issued",
+            emailType,
             deliveryOutcome: "uncertain",
             stage: "fetch",
             providerErrorMessage: errMsg,
@@ -1725,7 +2154,7 @@ serve(async (req) => {
       }
 
       // ── invoice_issued: conservative definite-failure vs uncertain outcome ──
-      if (emailType === "invoice_issued") {
+      if (emailType === "invoice_issued" || emailType === "receipt_issued") {
         // Classify conservatively: if the status does not clearly prove the
         // provider rejected the request, treat as uncertain.
         //
@@ -1760,7 +2189,7 @@ serve(async (req) => {
           return new Response(
             JSON.stringify({
               success: false,
-              emailType: "invoice_issued",
+              emailType,
               deliveryOutcome: "uncertain",
               stage: "resend",
               providerStatus,
@@ -1782,7 +2211,7 @@ serve(async (req) => {
           return new Response(
             JSON.stringify({
               success: false,
-              emailType: "invoice_issued",
+              emailType,
               deliveryOutcome: "failed",
               stage: "resend",
               providerStatus,
@@ -1804,7 +2233,7 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({
             success: false,
-            emailType: "invoice_issued",
+            emailType,
             deliveryOutcome: "uncertain",
             stage: "resend",
             providerStatus,
@@ -1852,11 +2281,11 @@ serve(async (req) => {
       resendData = await resendResponse?.json();
     } catch {
       // ── Malformed provider success response — uncertain for invoice_issued ─
-      if (emailType === "invoice_issued") {
+      if (emailType === "invoice_issued" || emailType === "receipt_issued") {
         return new Response(
           JSON.stringify({
             success: false,
-            emailType: "invoice_issued",
+            emailType,
             deliveryOutcome: "uncertain",
             stage: "resend_parse",
             providerStatus: resendResponse.status,
@@ -1883,11 +2312,11 @@ serve(async (req) => {
 
     if (!validMessageId) {
       // ── invoice_issued: missing/unusable email ID → uncertain outcome ─────
-      if (emailType === "invoice_issued") {
+      if (emailType === "invoice_issued" || emailType === "receipt_issued") {
         return new Response(
           JSON.stringify({
             success: false,
-            emailType: "invoice_issued",
+            emailType,
             deliveryOutcome: "uncertain",
             stage: "resend_id",
             providerStatus: resendResponse.status,
@@ -1929,11 +2358,11 @@ serve(async (req) => {
     // ── invoice_issued: structured success response ───────────────────────
     // emailId is returned so the future server helper can pass it to
     // complete_invoice_email_delivery_success().
-    if (emailType === "invoice_issued") {
+    if (emailType === "invoice_issued" || emailType === "receipt_issued") {
       return new Response(
         JSON.stringify({
           success: true,
-          emailType: "invoice_issued",
+          emailType,
           emailId: providedId,
           deliveryOutcome: "sent",
         }),
