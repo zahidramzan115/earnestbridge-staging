@@ -140,8 +140,7 @@ function normalizeEmailOutcome(outcome: ReceiptEmailOutcome): BrowserEmailOutcom
   switch (outcome) {
     case 'sent':
       return 'sent';
-    case 'already_sent':
-    case 'currently_sending':
+    case 'already_sent': case'currently_sending':
       return 'skipped';
     case 'uncertain':
       return 'uncertain';
