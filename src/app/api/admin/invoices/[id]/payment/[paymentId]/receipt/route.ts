@@ -8,6 +8,11 @@ import {
   generateReceiptPdf,
   ReceiptOrchestratorError,
 } from '@/lib/server/receiptPdfOrchestrator';
+import {
+  dispatchReceiptEmail,
+  ReceiptEmailDispatchError,
+  type ReceiptEmailOutcome,
+} from '@/lib/server/receiptEmail';
 
 // ============================================================
 // Admin Receipt API Route
@@ -123,6 +128,27 @@ function safeReceiptFilename(receiptNumber: string | null | undefined): string {
   const sanitized = receiptNumber.replace(/[^a-zA-Z0-9\-_]/g, '');
   if (!sanitized) return 'receipt.pdf';
   return `EarnestBridge-Receipt-${sanitized}.pdf`;
+}
+
+type BrowserEmailOutcome = 'sent' | 'skipped' | 'failed' | 'uncertain';
+
+/**
+ * Normalize the rich internal dispatcher outcome into the only value the
+ * browser is allowed to see. 'uncertain' is never collapsed.
+ */
+function normalizeEmailOutcome(outcome: ReceiptEmailOutcome): BrowserEmailOutcome {
+  switch (outcome) {
+    case 'sent':
+      return 'sent';
+    case 'already_sent':
+    case 'currently_sending':
+      return 'skipped';
+    case 'uncertain':
+      return 'uncertain';
+    case 'failed':
+    default:
+      return 'failed';
+  }
 }
 
 // ── POST ─────────────────────────────────────────────────────────────────────
@@ -373,10 +399,45 @@ export async function POST(
     );
   }
 
+  // ── 7b. Automatic receipt email ──────────────────────────────────────────
+  // Receipt generation has succeeded and is valid. Email is independent:
+  // no email problem may fail, roll back, or invalidate the receipt.
+  // Invoked for BOTH newly generated and already_complete receipts —
+  // the delivery table (claim_receipt_email_delivery) is the sole
+  // idempotency authority. Awaited — never fire-and-forget.
+  // Admin identity comes ONLY from the authenticated server session.
+  let emailOutcome: BrowserEmailOutcome = 'failed';
+  try {
+    const emailResult = await dispatchReceiptEmail({
+      paymentId,
+      adminUserId: admin.id,
+    });
+    emailOutcome = normalizeEmailOutcome(emailResult.outcome);
+  } catch (emailErr) {
+    if (
+      emailErr instanceof ReceiptEmailDispatchError &&
+      emailErr.code === 'RECEIPT_EMAIL_FINALIZE_ERROR'
+    ) {
+      // Finalization could not be persisted; a provider call may already
+      // have occurred, so delivery state is ambiguous.
+      emailOutcome = 'uncertain';
+    } else {
+      emailOutcome = 'failed';
+    }
+    console.error('[receipt POST] receipt email dispatch error:', {
+      paymentId,
+      code:
+        emailErr instanceof ReceiptEmailDispatchError
+          ? emailErr.code
+          : 'unexpected',
+    });
+  }
+
   // ── 8. Return safe success response ──────────────────────────────────────
   // Excluded: storage_path, pdf_hash, Admin UUID, Admin email, notes,
   //           recorded_by, idempotency_key, provider, provider_payment_id,
-  //           service-role information, raw RPC results.
+  //           service-role information, raw RPC results, email delivery
+  //           internals (deliveryId, attemptCount, recipient, provider IDs).
   return NextResponse.json(
     {
       success: true,
@@ -387,6 +448,9 @@ export async function POST(
         receipt_issued_at: result.receipt_issued_at,
         generated_at: result.generated_at,
         already_complete: result.already_complete,
+      },
+      email: {
+        outcome: emailOutcome,
       },
     },
     { status: 200, headers: NO_STORE_HEADERS },
