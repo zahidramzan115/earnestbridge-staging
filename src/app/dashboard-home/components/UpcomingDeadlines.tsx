@@ -154,19 +154,13 @@ export default function UpcomingDeadlines() {
           <div className="space-y-2.5">
             {closingDeals.map((deal) => (
               <div key={`closing-${deal.id}`} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-                <div className={`w-10 h-10 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-center ${
-                  deal.daysLeft <= 7 ? 'bg-amber-50' : deal.daysLeft <= 14 ? 'bg-blue-50' : 'bg-gray-50'
-                }`}>
-                  <span className={`tabular-nums text-base font-display font-800 leading-none ${
-                    deal.daysLeft <= 7 ? 'text-amber-600' : deal.daysLeft <= 14 ? 'text-blue-600' : 'text-gray-600'
-                  }`}>{deal.daysLeft}</span>
-                  <span className={`text-[9px] font-600 uppercase tracking-wide ${
-                    deal.daysLeft <= 7 ? 'text-amber-500' : deal.daysLeft <= 14 ? 'text-blue-400' : 'text-gray-400'
-                  }`}>days</span>
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-50">
+                  <Icon name="CalendarDaysIcon" size={18} className="text-gray-400" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{deal.dealName}</p>
-                  <p className="text-xs text-gray-400 truncate mt-0.5">{formatDateStable(deal.closingDate)}</p>
+                  <p className="text-[10px] font-600 uppercase tracking-wide text-gray-400 mt-0.5">Target Closing</p>
+                  <p className="text-xs text-gray-500 truncate">{formatDateStable(deal.closingDate)}</p>
                 </div>
                 <StatusBadge status={deal.status} size="sm" />
               </div>
