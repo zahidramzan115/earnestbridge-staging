@@ -10,7 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface Deal {
   id: string;
-  user_id: string;
+  user_id?: string;
   company_name: string | null;
   property_address: string | null;
   property_type: string | null;
@@ -18,14 +18,14 @@ interface Deal {
   deposit_amount: number | null;
   closing_date: string | null;
   app_status: string;
-  submitted_at: string | null;
-  created_at: string;
-  days_to_funding: number | null;
+  submitted_at?: string | null;
+  created_at?: string;
+  days_to_funding?: number | null;
   llc_name: string | null;
   llc_state: string | null;
   transaction_description: string | null;
-  psa_file_url: string | null;
-  psa_file_name: string | null;
+  psa_file_url?: string | null;
+  psa_file_name?: string | null;
   deal_workflow_stage?: number | null;
   w9_signed?: boolean;
   mou_signed?: boolean;
@@ -418,6 +418,7 @@ export default function DealDetailsContent() {
   const supabase = useMemo(() => createClient(), []);
 
   const [deal, setDeal] = useState<Deal | null>(null);
+  const [accessMode, setAccessMode] = useState<'owner' | 'contact' | null>(null);
   const [loading, setLoading] = useState(true);
   const [adminFeedback, setAdminFeedback] = useState<AdminFeedback[]>([]);
   const [docs, setDocs] = useState<BorrowerDoc[]>([]);
@@ -435,16 +436,21 @@ export default function DealDetailsContent() {
 
   const fetchDeal = useCallback(async () => {
     if (!user || !id) { setLoading(false); return; }
-    const { data, error } = await supabase
-      .from('borrower_applications')
-      .select('*')
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .single();
-    if (error || !data) { router.push('/deals'); return; }
-    setDeal(data as Deal);
-    setLoading(false);
-  }, [user, id, supabase, router]);
+    try {
+      const res = await fetch(`/api/portal/deals/${id}`, { cache: 'no-store' });
+      if (!res.ok) { router.push('/deals'); return; }
+      const json = await res.json();
+      if (!json || !json.deal || (json.access_mode !== 'owner' && json.access_mode !== 'contact')) {
+        router.push('/deals');
+        return;
+      }
+      setAccessMode(json.access_mode as 'owner' | 'contact');
+      setDeal(json.deal as Deal);
+      setLoading(false);
+    } catch {
+      router.push('/deals');
+    }
+  }, [user, id, router]);
 
   const fetchFeedback = useCallback(async () => {
     if (!id) return;
@@ -522,20 +528,21 @@ export default function DealDetailsContent() {
   }, [fetchDeal, authLoading]);
 
   useEffect(() => {
-    if (deal) { fetchFeedback(); fetchDocs(); }
-  }, [deal, fetchFeedback, fetchDocs]);
+    if (deal && accessMode === 'owner') { fetchFeedback(); fetchDocs(); }
+  }, [deal, accessMode, fetchFeedback, fetchDocs]);
 
   useEffect(() => {
-    if (activeTab === 'activity' && deal) fetchActivity();
-  }, [activeTab, deal, fetchActivity]);
+    if (activeTab === 'activity' && deal && accessMode === 'owner') fetchActivity();
+  }, [activeTab, deal, accessMode, fetchActivity]);
 
   useEffect(() => {
     if (activeTab === 'invoices' && deal) fetchInvoices();
   }, [activeTab, deal, fetchInvoices]);
 
-  // Real-time deal status updates
+  // Real-time deal status updates (owner access only; contact-only users use the
+  // server-loaded snapshot because the Realtime stream is owner-RLS scoped)
   useEffect(() => {
-    if (!user || !id) return;
+    if (!user || !id || accessMode !== 'owner') return;
     const channel = supabase
       .channel(`deal-detail-${id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'borrower_applications', filter: `id=eq.${id}` }, (payload) => {
@@ -545,7 +552,7 @@ export default function DealDetailsContent() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user, id, supabase]);
+  }, [user, id, supabase, accessMode]);
 
   if (authLoading || loading) {
     return (
@@ -564,19 +571,24 @@ export default function DealDetailsContent() {
   const isUrgent = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
   const dealLabel = deal.company_name || deal.property_address || `Deal ${deal.id.slice(0, 6)}`;
 
+  const isOwner = accessMode === 'owner';
   const actionRequiredFeedback = adminFeedback.filter(f => f.feedback_type === 'action_required');
   const pendingDocs = REQUIRED_DOCS.filter(r => {
     const d = docs.find(doc => doc.document_type === r.type || doc.compliance_type === r.type);
     return !d || d.doc_status === 'resubmit_requested' || d.doc_status === 'rejected';
   });
 
-  const tabs = [
+  const allTabs = [
     { key: 'overview',   label: 'Overview',   icon: 'Squares2X2Icon' },
     { key: 'documents',  label: 'Documents',  icon: 'FolderOpenIcon',  badge: pendingDocs.length },
     { key: 'invoices',   label: 'Invoices',   icon: 'DocumentTextIcon' },
     { key: 'feedback',   label: 'Feedback',   icon: 'ChatBubbleLeftEllipsisIcon', badge: actionRequiredFeedback.length },
     { key: 'activity',   label: 'Activity',   icon: 'ClockIcon' },
   ] as const;
+  // Contact-only users see Overview + Invoices only (owner-only tabs hidden).
+  const tabs = isOwner
+    ? allTabs
+    : allTabs.filter(t => t.key === 'overview' || t.key === 'invoices');
 
   const EVENT_TYPE_ICONS: Record<string, { icon: string; color: string }> = {
     status_change:   { icon: 'ArrowPathIcon',              color: 'text-indigo-500 bg-indigo-50' },
@@ -662,7 +674,7 @@ export default function DealDetailsContent() {
       </div>
 
       {/* Action required banner */}
-      {(actionRequiredFeedback.length > 0 || pendingDocs.length > 0) && (
+      {isOwner && (actionRequiredFeedback.length > 0 || pendingDocs.length > 0) && (
         <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
           <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
             <Icon name="ExclamationTriangleIcon" size={18} className="text-amber-600" />
@@ -803,6 +815,7 @@ export default function DealDetailsContent() {
               <h3 className="font-display font-700 text-gray-900 text-sm">Quick Actions</h3>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {isOwner && (
               <button
                 onClick={() => setActiveTab('documents')}
                 className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:border-eb-green-200 hover:bg-eb-green-50 transition-all group"
@@ -812,6 +825,8 @@ export default function DealDetailsContent() {
                 </div>
                 <span className="text-xs font-display font-700 text-gray-700 text-center">Upload Documents</span>
               </button>
+              )}
+              {isOwner && (
               <button
                 onClick={() => setActiveTab('feedback')}
                 className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:border-eb-green-200 hover:bg-eb-green-50 transition-all group"
@@ -821,6 +836,7 @@ export default function DealDetailsContent() {
                 </div>
                 <span className="text-xs font-display font-700 text-gray-700 text-center">View Feedback</span>
               </button>
+              )}
               <Link
                 href="/deadlines"
                 className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:border-eb-green-200 hover:bg-eb-green-50 transition-all group"
@@ -836,7 +852,7 @@ export default function DealDetailsContent() {
       )}
 
       {/* Tab: Documents */}
-      {activeTab === 'documents' && (
+      {isOwner && activeTab === 'documents' && (
         <div className="space-y-4">
           {/* Document status summary */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -1041,7 +1057,7 @@ export default function DealDetailsContent() {
       )}
 
       {/* Tab: Feedback */}
-      {activeTab === 'feedback' && (
+      {isOwner && activeTab === 'feedback' && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <Icon name="ChatBubbleLeftEllipsisIcon" size={15} className="text-gray-500" />
@@ -1079,7 +1095,7 @@ export default function DealDetailsContent() {
       )}
 
       {/* Tab: Activity */}
-      {activeTab === 'activity' && (
+      {isOwner && activeTab === 'activity' && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <Icon name="ClockIcon" size={15} className="text-gray-500" />
