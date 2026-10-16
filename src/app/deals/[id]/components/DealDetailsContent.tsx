@@ -87,6 +87,28 @@ function calendarDaysBetween(todayYmd: string, deadlineYmd: string): number {
   return Math.round((Date.UTC(dy, dm - 1, dd) - Date.UTC(ty, tm - 1, td)) / 86400000);
 }
 
+// Current America/New_York calendar date (YYYY-MM-DD) and minutes since ET midnight.
+function getEtNow(): { ymd: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  const hour = Number(get('hour')) % 24;
+  return {
+    ymd: `${get('year')}-${get('month')}-${get('day')}`,
+    minutes: hour * 60 + Number(get('minute')),
+  };
+}
+
+// 5:00 PM ET option exercise cutoff, expressed in minutes since ET midnight.
+const OPTION_CUTOFF_MINUTES_ET = 17 * 60;
+
 interface BorrowerDoc {
   id: string;
   document_name: string;
@@ -455,7 +477,7 @@ export default function DealDetailsContent() {
 
   const [deal, setDeal] = useState<Deal | null>(null);
   const [optionCycle, setOptionCycle] = useState<PortalOptionCycle | null>(null);
-  const [todayEt, setTodayEt] = useState<string | null>(null);
+  const [etNow, setEtNow] = useState<{ ymd: string; minutes: number } | null>(null);
   const [accessMode, setAccessMode] = useState<'owner' | 'contact' | null>(null);
   const [loading, setLoading] = useState(true);
   const [adminFeedback, setAdminFeedback] = useState<AdminFeedback[]>([]);
@@ -608,9 +630,14 @@ export default function DealDetailsContent() {
     if (activeTab === 'invoices' && deal) fetchInvoices();
   }, [activeTab, deal, fetchInvoices]);
 
-  // Today's date in America/New_York (client-only, avoids hydration mismatch)
+  // Current ET date/time (client-only, avoids hydration mismatch). Refreshes about
+  // once per minute so the deadline state updates across 5:00 PM ET and midnight ET
+  // while the page stays open. Local state only — no API calls.
   useEffect(() => {
-    setTodayEt(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()));
+    const tick = () => setEtNow(getEtNow());
+    tick();
+    const timerId = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(timerId);
   }, []);
 
   // Real-time deal status updates (owner access only; contact-only users use the
@@ -821,7 +848,10 @@ export default function DealDetailsContent() {
           {optionCycle && (() => {
             const statusUi = OPTION_STATUS_UI[optionCycle.client_status] ?? OPTION_STATUS_UI.action_required;
             const exercised = optionCycle.client_status === 'option_exercised';
-            const daysLeft = todayEt ? calendarDaysBetween(todayEt, optionCycle.option_exercise_deadline) : null;
+            const rawDaysLeft = etNow ? calendarDaysBetween(etNow.ymd, optionCycle.option_exercise_deadline) : null;
+            // On the deadline date itself, at/after 5:00 PM ET the deadline has passed.
+            const daysLeft =
+              rawDaysLeft === 0 && etNow && etNow.minutes >= OPTION_CUTOFF_MINUTES_ET ? -1 : rawDaysLeft;
             const showUrgency = !exercised && daysLeft !== null && daysLeft <= 7;
             const countdown =
               exercised || daysLeft === null

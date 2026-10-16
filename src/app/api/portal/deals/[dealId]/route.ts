@@ -46,64 +46,70 @@ function formatOptionCutoffDisplay(deadlineDateStr: string): string {
 }
 
 // Runs ONLY after the owner/contact authorization check has succeeded.
-// Failures are non-fatal: the option card is optional, so we return null.
+// Returns null ONLY when no client-visible (active/exercised) cycle exists.
+// Database errors and malformed required data THROW so the caller returns a
+// safe server error instead of silently hiding a critical deadline.
 async function loadPortalOptionCycle(
   supabase: ReturnType<typeof getServiceClient>,
   dealId: string
 ): Promise<PortalOptionCycle | null> {
-  try {
-    const { data: rows, error } = await supabase
-      .from('crm_deal_option_cycles')
-      .select(
-        'cycle_number, deposit_goes_hard_date, option_exercise_deadline, status, actual_option_exercised_at, option_exercised_at, actual_amendment_received_at, extension_psa_amendment_received_at, extension_fee_paid_at'
-      )
-      .eq('application_id', dealId)
-      .eq('status', 'active')
-      .order('cycle_number', { ascending: false })
-      .limit(1);
+  const { data: rows, error } = await supabase
+    .from('crm_deal_option_cycles')
+    .select(
+      'cycle_number, deposit_goes_hard_date, option_exercise_deadline, status, actual_option_exercised_at, option_exercised_at, actual_amendment_received_at, extension_psa_amendment_received_at, extension_fee_paid_at'
+    )
+    .eq('application_id', dealId)
+    .in('status', ['active', 'exercised'])
+    .order('cycle_number', { ascending: false })
+    .limit(1);
 
-    if (error || !rows || rows.length === 0) return null;
-    const row = rows[0] as {
-      cycle_number: number;
-      deposit_goes_hard_date: string | null;
-      option_exercise_deadline: string | null;
-      actual_option_exercised_at: string | null;
-      option_exercised_at: string | null;
-      actual_amendment_received_at: string | null;
-      extension_psa_amendment_received_at: string | null;
-      extension_fee_paid_at: string | null;
-    };
-
-    if (!row.option_exercise_deadline || !row.deposit_goes_hard_date) return null;
-
-    // Same cutoff rule as /api/client/deadlines (5:00 PM ET on the deadline date).
-    const amendmentTs = row.actual_amendment_received_at ?? row.extension_psa_amendment_received_at;
-    let hasTimelyAmendment = false;
-    if (amendmentTs) {
-      const cutoff = getOptionDeadlineCutoff(row.option_exercise_deadline);
-      hasTimelyAmendment = new Date(amendmentTs).getTime() <= cutoff.getTime();
-    }
-
-    const feePaid = !!row.extension_fee_paid_at;
-    const exercised = !!(row.actual_option_exercised_at ?? row.option_exercised_at);
-
-    let clientStatus: ClientOptionStatus = 'action_required';
-    if (exercised) clientStatus = 'option_exercised';
-    else if (hasTimelyAmendment && feePaid) clientStatus = 'extension_requirements_received';
-    else if (hasTimelyAmendment) clientStatus = 'extension_in_process';
-
-    return {
-      cycle_number: row.cycle_number,
-      deposit_goes_hard_date: row.deposit_goes_hard_date,
-      option_exercise_deadline: row.option_exercise_deadline,
-      option_deadline_cutoff_display: formatOptionCutoffDisplay(row.option_exercise_deadline),
-      client_status: clientStatus,
-      has_timely_amendment: hasTimelyAmendment,
-      extension_fee_paid: feePaid,
-    };
-  } catch {
-    return null;
+  if (error) {
+    throw new Error('option_cycle_query_failed');
   }
+  if (!rows || rows.length === 0) return null;
+
+  const row = rows[0] as {
+    cycle_number: number;
+    deposit_goes_hard_date: string | null;
+    option_exercise_deadline: string | null;
+    status: string;
+    actual_option_exercised_at: string | null;
+    option_exercised_at: string | null;
+    actual_amendment_received_at: string | null;
+    extension_psa_amendment_received_at: string | null;
+    extension_fee_paid_at: string | null;
+  };
+
+  if (!row.option_exercise_deadline || !row.deposit_goes_hard_date) {
+    throw new Error('option_cycle_malformed');
+  }
+
+  // Same cutoff rule as /api/client/deadlines (5:00 PM ET on the deadline date).
+  const amendmentTs = row.actual_amendment_received_at ?? row.extension_psa_amendment_received_at;
+  let hasTimelyAmendment = false;
+  if (amendmentTs) {
+    const cutoff = getOptionDeadlineCutoff(row.option_exercise_deadline);
+    hasTimelyAmendment = new Date(amendmentTs).getTime() <= cutoff.getTime();
+  }
+
+  const feePaid = !!row.extension_fee_paid_at;
+  const exercised =
+    row.status === 'exercised' || !!(row.actual_option_exercised_at ?? row.option_exercised_at);
+
+  let clientStatus: ClientOptionStatus = 'action_required';
+  if (exercised) clientStatus = 'option_exercised';
+  else if (hasTimelyAmendment && feePaid) clientStatus = 'extension_requirements_received';
+  else if (hasTimelyAmendment) clientStatus = 'extension_in_process';
+
+  return {
+    cycle_number: row.cycle_number,
+    deposit_goes_hard_date: row.deposit_goes_hard_date,
+    option_exercise_deadline: row.option_exercise_deadline,
+    option_deadline_cutoff_display: formatOptionCutoffDisplay(row.option_exercise_deadline),
+    client_status: clientStatus,
+    has_timely_amendment: hasTimelyAmendment,
+    extension_fee_paid: feePaid,
+  };
 }
 
 // ── Auth helpers (same inline pattern as the other portal routes) ─────────────
