@@ -63,9 +63,6 @@ export interface ClosingDateItem {
 // These fields are safe to expose. Internal fields are excluded.
 //
 // CRITICAL OMISSIONS (must never be returned to client):
-//   - deposit_goes_hard_date: ADMIN ONLY — internal EarnestBridge operational date.
-//     Borrowers must NOT receive this value. The two-day internal buffer must
-//     not be disclosed. The client sees only the Option Exercise Deadline.
 //   - created_by, updated_by: Admin identity metadata
 //   - internal notes, admin metadata
 //   - internal fee-leniency language
@@ -78,8 +75,8 @@ export interface ClientOptionCycleItem {
   id: string;
   application_id: string;
   cycle_number: number;
-  // NOTE: deposit_goes_hard_date is intentionally EXCLUDED.
-  // It is an Admin-only internal date. Borrowers must not receive it.
+  // Client-facing deal date (DATE, YYYY-MM-DD). Secondary/informational only.
+  deposit_goes_hard_date: string | null;
   option_exercise_deadline: string;
   // Canonical cutoff display string: "Sep 24, 2026 at 5:00 PM ET"
   option_deadline_cutoff_display: string;
@@ -109,20 +106,18 @@ function formatOptionCutoffDisplay(deadlineDateStr: string): string {
 
 // ── GET /api/client/deadlines ─────────────────────────────────────────────────
 //
-// SECURITY MODEL:
+// SECURITY MODEL (aligned with /api/portal/deals/[dealId]):
 // 1. Authenticate session — derive authenticatedUser.id server-side
-// 2. Query borrower_applications WHERE user_id = authenticatedUser.id
-// 3. Query crm_deal_deadlines WHERE application_id IN (user's own deals)
-//    AND client_visible = true AND status != 'cancelled'
-// 4. Query crm_deal_option_cycles WHERE application_id IN (user's own deals)
-//    AND status = 'active' — return safe explicit fields only
-// 5. Return ONLY safe projection — never notes, created_by, completed_by,
+// 2. Build the authorized application ID set server-side:
+//      A. borrower_applications.user_id = authenticated user.id (owner), OR
+//      B. approved crm_contacts (portal_user_id = user.id,
+//         portal_link_status = 'approved') linked via
+//         crm_deal_contacts (contact_id -> deal_id = application id)
+//    IDs are deduplicated. Client-supplied IDs are never used.
+// 3. Query borrower_applications, crm_deal_deadlines and crm_deal_option_cycles
+//    strictly within that authorized ID set.
+// 4. Return ONLY safe projection — never notes, created_by, completed_by,
 //    internal admin metadata, or internal leniency language
-//
-// CRITICAL: deposit_goes_hard_date is NEVER returned to the client.
-// It is an Admin-only internal operational date. The two-day buffer between
-// the Option Exercise Deadline and the Deposit Goes Hard Date must not be
-// disclosed to borrowers.
 //
 // Never accepts user_id, borrower email, or contact id from the browser.
 // Service role is used AFTER authentication is verified.
@@ -142,11 +137,55 @@ export async function GET() {
   // Step 2: Use service role AFTER authentication is confirmed
   const supabase = getServiceClient();
 
-  // Step 3: Fetch only this user's deals
+  // Step 3a: Owned deal IDs (PATH A)
+  const { data: ownedRows, error: ownedError } = await supabase
+    .from('borrower_applications')
+    .select('id')
+    .eq('user_id', authenticatedUserId);
+
+  if (ownedError) {
+    return NextResponse.json({ error: 'Failed to fetch deals' }, { status: 500 });
+  }
+
+  // Step 3b: Approved-contact linked deal IDs (PATH B)
+  const { data: approvedContacts, error: contactError } = await supabase
+    .from('crm_contacts')
+    .select('id')
+    .eq('portal_user_id', authenticatedUserId)
+    .eq('portal_link_status', 'approved');
+
+  if (contactError) {
+    return NextResponse.json({ error: 'Failed to fetch deals' }, { status: 500 });
+  }
+
+  let linkedDealIds: string[] = [];
+  const approvedContactIds = (approvedContacts || []).map((c: any) => c.id);
+  if (approvedContactIds.length > 0) {
+    const { data: dealContacts, error: dealContactError } = await supabase
+      .from('crm_deal_contacts')
+      .select('deal_id')
+      .in('contact_id', approvedContactIds);
+
+    if (dealContactError) {
+      return NextResponse.json({ error: 'Failed to fetch deals' }, { status: 500 });
+    }
+    linkedDealIds = (dealContacts || []).map((r: any) => r.deal_id).filter(Boolean);
+  }
+
+  // Deduplicated authorized ID set — the boundary for all queries below
+  const dealIds: string[] = Array.from(
+    new Set<string>([...(ownedRows || []).map((r: any) => r.id), ...linkedDealIds])
+  );
+
+  if (dealIds.length === 0) {
+    return NextResponse.json({ deadlines: [], closingDates: [], optionCycles: [] });
+  }
+
+  // Step 3c: Fetch deal display context, scoped to authorized IDs only
   const { data: deals, error: dealsError } = await supabase
     .from('borrower_applications')
     .select('id, property_address, company_name, closing_date, app_status')
-    .eq('user_id', authenticatedUserId);
+    .in('id', dealIds);
 
   if (dealsError) {
     return NextResponse.json({ error: 'Failed to fetch deals' }, { status: 500 });
@@ -155,8 +194,6 @@ export async function GET() {
   if (!deals || deals.length === 0) {
     return NextResponse.json({ deadlines: [], closingDates: [], optionCycles: [] });
   }
-
-  const dealIds = deals.map((d: any) => d.id);
 
   // Build deal lookup for display context
   const dealMap: Record<string, { property_address: string | null; display_name: string | null }> = {};
@@ -207,18 +244,14 @@ export async function GET() {
       deal_display_name: d.company_name || d.property_address || null,
     }));
 
-  // Step 7: Query ACTIVE option cycles for this user's deals only
+  // Step 7: Query ACTIVE option cycles for authorized deals only
   // SECURITY: Borrower has NO direct SELECT on crm_deal_option_cycles.
-  // This server-side query uses service role scoped to the user's own deal IDs.
+  // This server-side query uses service role scoped to the authorized deal IDs.
   // Only active cycles are returned (not historical extended/exercised/missed cycles).
   // Only safe fields are included in the response — no internal admin metadata.
-  //
-  // CRITICAL: deposit_goes_hard_date is fetched internally for timeliness
-  // derivation but is NOT included in the client response mapping below.
   const { data: rawOptionCycles, error: optionError } = await supabase
     .from('crm_deal_option_cycles')
     .select(
-      // deposit_goes_hard_date is fetched for server-side use only — NOT returned to client
       'id, application_id, cycle_number, deposit_goes_hard_date, option_exercise_deadline, status, option_exercised_at, actual_option_exercised_at, extension_psa_amendment_received_at, actual_amendment_received_at, extension_fee_paid_at'
     )
     .in('application_id', dealIds)
@@ -254,14 +287,12 @@ export async function GET() {
         : null;
 
       // Safe explicit mapping — no spread of raw row
-      // CRITICAL: deposit_goes_hard_date is intentionally excluded from this mapping.
-      // It is an Admin-only internal date. The two-day buffer must not be disclosed.
       optionCycles.push({
         type: 'option_cycle',
         id: row.id,
         application_id: row.application_id,
         cycle_number: row.cycle_number,
-        // deposit_goes_hard_date: EXCLUDED — Admin only, never returned to client
+        deposit_goes_hard_date: row.deposit_goes_hard_date ?? null,
         option_exercise_deadline: row.option_exercise_deadline,
         option_deadline_cutoff_display: formatOptionCutoffDisplay(row.option_exercise_deadline),
         option_status: clientStatus,

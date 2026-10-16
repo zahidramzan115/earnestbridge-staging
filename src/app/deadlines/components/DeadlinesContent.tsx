@@ -33,6 +33,7 @@ interface ClientOptionCycleItem {
   type: 'option_cycle';
   id: string;
   application_id: string;
+  deposit_goes_hard_date: string | null;
   cycle_number: number;
   // NOTE: deposit_goes_hard_date is intentionally absent — Admin only, never returned to client
   option_exercise_deadline: string;
@@ -65,6 +66,7 @@ interface DisplayDeadline {
   optionStatus?: 'active' | 'exercised' | 'extended';
   optionHasTimelyAmendment?: boolean;
   optionFeePaid?: boolean;
+  depositGoesHardDate?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -109,7 +111,6 @@ function responsiblePartyStyle(rp: string): string {
 // ─── Option Cycle Status for Client ──────────────────────────────────────────
 // Maps server-derived option state to client-safe display language.
 // Do NOT expose internal fee-leniency language.
-// Do NOT expose Deposit Goes Hard Date or two-day buffer.
 // Do NOT expose manual override policy.
 
 function getClientOptionStatusLabel(cycle: DisplayDeadline): { label: string; color: string; bg: string } {
@@ -127,11 +128,11 @@ function getClientOptionStatusLabel(cycle: DisplayDeadline): { label: string; co
 
 // ─── Option Cycle Card ────────────────────────────────────────────────────────
 // SECURITY: This card must NEVER display:
-//   - Deposit Goes Hard Date (Admin-only internal date)
-//   - Two-day internal buffer language
+//   - Internal buffer language
 //   - Manual override policy
 //   - Internal leniency language
 //   - Late amendment status (client sees only the Option Exercise Deadline as firm)
+// Deposit Goes Hard is shown as a neutral, secondary date only (no countdown/urgency).
 
 function OptionCycleCard({ item }: { item: DisplayDeadline }) {
   const state = item.derivedState;
@@ -165,7 +166,7 @@ function OptionCycleCard({ item }: { item: DisplayDeadline }) {
         </span>
       </div>
 
-      {/* Key date — Option Exercise Deadline only (Deposit Goes Hard Date is Admin-only) */}
+      {/* Key date — Option Exercise Deadline is PRIMARY */}
       <div className="grid grid-cols-1 gap-2">
         <div className="bg-white/70 rounded-xl px-3 py-2.5 border border-white/50">
           <p className="text-[10px] font-display font-600 text-gray-400 uppercase tracking-wide mb-0.5">Option Exercise Deadline</p>
@@ -181,6 +182,13 @@ function OptionCycleCard({ item }: { item: DisplayDeadline }) {
             </p>
           )}
         </div>
+        {/* Deposit Goes Hard — neutral secondary date, no countdown or urgency */}
+        {item.depositGoesHardDate && (
+          <div className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200">
+            <p className="text-[10px] font-display font-600 text-gray-400 uppercase tracking-wide">Deposit Goes Hard</p>
+            <p className="text-xs font-display font-600 text-gray-600">{formatDateShort(item.depositGoesHardDate)}</p>
+          </div>
+        )}
       </div>
 
       {/* Extension in process sub-status */}
@@ -379,6 +387,7 @@ export default function DeadlinesContent() {
         optionStatus: oc.option_status,
         optionHasTimelyAmendment: oc.has_timely_amendment,
         optionFeePaid: oc.extension_fee_paid,
+        depositGoesHardDate: oc.deposit_goes_hard_date ?? null,
         // depositGoesHardDate: intentionally excluded — Admin only
       };
     });
