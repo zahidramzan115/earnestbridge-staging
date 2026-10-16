@@ -24,7 +24,9 @@ export async function POST(request: NextRequest) {
   let supabaseUrl: string;
   let serviceRoleKey: string;
   try {
-    ({ supabaseUrl, serviceRoleKey } = validateServerEnv());
+    const env = validateServerEnv();
+    supabaseUrl = env.supabaseUrl;
+    serviceRoleKey = env.serviceRoleKey;
   } catch {
     return NextResponse.json(
       { error: 'Required server environment variable is not configured.' },

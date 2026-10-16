@@ -433,13 +433,20 @@ export default function DealDetailsContent() {
   const [invoicesError, setInvoicesError] = useState(false);
   // Prevent duplicate fetches during the same mounted session
   const invoicesFetchedRef = useRef(false);
+  // Monotonic request counter: ignores responses from superseded Deal fetches
+  const dealRequestRef = useRef(0);
+  // Always points at the latest background re-fetch (no effect dependency loops)
+  const refetchDealRef = useRef<() => void>(() => {});
 
-  const fetchDeal = useCallback(async () => {
-    if (!user || !id) { setLoading(false); return; }
+  const fetchDeal = useCallback(async (background: boolean = false) => {
+    if (!user || !id) { if (!background) setLoading(false); return; }
+    const requestId = ++dealRequestRef.current;
     try {
       const res = await fetch(`/api/portal/deals/${id}`, { cache: 'no-store' });
+      if (requestId !== dealRequestRef.current) return;
       if (!res.ok) { router.push('/deals'); return; }
       const json = await res.json();
+      if (requestId !== dealRequestRef.current) return;
       if (!json || !json.deal || (json.access_mode !== 'owner' && json.access_mode !== 'contact')) {
         router.push('/deals');
         return;
@@ -448,6 +455,7 @@ export default function DealDetailsContent() {
       setDeal(json.deal as Deal);
       setLoading(false);
     } catch {
+      if (requestId !== dealRequestRef.current) return;
       router.push('/deals');
     }
   }, [user, id, router]);
@@ -523,9 +531,31 @@ export default function DealDetailsContent() {
     fetchInvoices();
   }, [fetchInvoices]);
 
+  // Clear all prior-Deal state whenever the route id changes, before the new
+  // Deal is rendered, so stale content / owner-only tabs never carry across.
+  // Declared BEFORE the load effect so it runs first on mount / id change.
+  useEffect(() => {
+    dealRequestRef.current += 1;
+    setDeal(null);
+    setAccessMode(null);
+    setActiveTab('overview');
+    setLoading(true);
+    setAdminFeedback([]);
+    setDocs([]);
+    setActivityEvents([]);
+    setInvoices([]);
+    setInvoicesError(false);
+    setLiveStatus(false);
+    invoicesFetchedRef.current = false;
+  }, [id]);
+
   useEffect(() => {
     if (!authLoading) fetchDeal();
   }, [fetchDeal, authLoading]);
+
+  useEffect(() => {
+    refetchDealRef.current = () => { fetchDeal(true); };
+  }, [fetchDeal]);
 
   useEffect(() => {
     if (deal && accessMode === 'owner') { fetchFeedback(); fetchDocs(); }
@@ -540,15 +570,17 @@ export default function DealDetailsContent() {
   }, [activeTab, deal, fetchInvoices]);
 
   // Real-time deal status updates (owner access only; contact-only users use the
-  // server-loaded snapshot because the Realtime stream is owner-RLS scoped)
+  // server-loaded snapshot because the Realtime stream is owner-RLS scoped).
+  // The Realtime payload is used ONLY as a change signal — the Deal is re-fetched
+  // through the authorized server endpoint so the response allow-list is preserved.
   useEffect(() => {
     if (!user || !id || accessMode !== 'owner') return;
     const channel = supabase
       .channel(`deal-detail-${id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'borrower_applications', filter: `id=eq.${id}` }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'borrower_applications', filter: `id=eq.${id}` }, () => {
         setLiveStatus(true);
         setTimeout(() => setLiveStatus(false), 3000);
-        if (payload.new) setDeal(payload.new as Deal);
+        refetchDealRef.current();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
