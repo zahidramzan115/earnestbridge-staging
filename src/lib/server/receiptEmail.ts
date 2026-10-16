@@ -624,6 +624,9 @@ async function callEdgeFunction(
 
     paymentId: payment.id,
     invoiceId: invoice.id,
+    // Server-derived from the server-loaded invoice snapshot only (never browser input).
+    // Used by the Edge Function solely to build the client-portal Deal page link.
+    dealId: invoice.application_id,
     invoiceNumber: invoice.invoice_number,
     receiptNumber: payment.receipt_number,
     receiptIssuedAt: payment.receipt_issued_at,

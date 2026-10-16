@@ -1647,6 +1647,7 @@ serve(async (req) => {
       const rcTo: unknown = body?.to;
       const rcPaymentId: unknown = body?.paymentId;
       const rcInvoiceId: unknown = body?.invoiceId;
+      const rcDealId: unknown = body?.dealId;
       const rcInvoiceNumber: unknown = body?.invoiceNumber;
       const rcReceiptNumber: unknown = body?.receiptNumber;
       const rcReceiptIssuedAt: unknown = body?.receiptIssuedAt;
@@ -1681,6 +1682,19 @@ serve(async (req) => {
       if (!rcIsNonblank(rcInvoiceId) || !rcUuidRe.test(rcInvoiceId.trim())) {
         return rcValidationError("receipt_issued: 'invoiceId' must be a valid UUID");
       }
+
+      // dealId — OPTIONAL (backward compatible with older dispatcher payloads).
+      // Absent (undefined/null) → no portal CTA. Present → must be a strict UUID.
+      let rcDealIdTrimmed: string | null = null;
+      if (rcDealId !== undefined && rcDealId !== null) {
+        if (!rcIsNonblank(rcDealId) || !rcUuidRe.test(rcDealId.trim())) {
+          return rcValidationError("receipt_issued: 'dealId' must be a valid UUID");
+        }
+        rcDealIdTrimmed = rcDealId.trim();
+      }
+      const rcPortalUrl: string | null = rcDealIdTrimmed !== null
+        ? `${appUrl.replace(/\/+$/, "")}/deals/${rcDealIdTrimmed}`
+        : null;
 
       // invoiceNumber
       if (!rcIsNonblank(rcInvoiceNumber)) {
@@ -1954,6 +1968,10 @@ serve(async (req) => {
             <p style="color: #374151; line-height: 1.7;">
               Your payment receipt is attached for your records.
             </p>
+            ${rcPortalUrl !== null ? `<a href="${rcPortalUrl}" style="${btnStyle}">View Receipt in Client Portal</a>
+            <p style="color: #6b7280; font-size: 13px; line-height: 1.6;">
+              Sign in to your EarnestBridge client portal to view or download this receipt. Portal access requires an approved account.
+            </p>` : ""}
 
             <p style="margin-top: 28px; color: #374151;">
               Thank you,<br/><strong>EarnestBridge</strong>
@@ -1998,6 +2016,15 @@ serve(async (req) => {
         "",
         "Your payment receipt is attached for your records.",
         "",
+        ...(rcPortalUrl !== null
+          ? [
+              "View Receipt in Client Portal:",
+              rcPortalUrl,
+              "",
+              "Sign in to your EarnestBridge client portal to view or download this receipt. Portal access requires an approved account.",
+              "",
+            ]
+          : []),
         "Thank you,",
         "EarnestBridge",
         `Payment Receipt · ${rcReceiptNumberTrimmed}`
