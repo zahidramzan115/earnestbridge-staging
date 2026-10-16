@@ -30,7 +30,7 @@ export async function GET() {
   }
 
   // 3. Create service-role client
-  const adminClient = createServiceRoleClient(supabaseUrl as string, serviceRoleKey as string);
+  const adminClient = createServiceRoleClient(supabaseUrl, serviceRoleKey);
 
   // 4. Paginate auth.admin.listUsers() and filter server-side to Admin users only
   try {
