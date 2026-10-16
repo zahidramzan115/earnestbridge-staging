@@ -18,8 +18,8 @@ export async function GET() {
   }
 
   // 2. Validate server environment
-  let supabaseUrl: string;
-  let serviceRoleKey: string;
+  let supabaseUrl: string | undefined;
+  let serviceRoleKey: string | undefined;
   try {
     ({ supabaseUrl, serviceRoleKey } = validateServerEnv());
   } catch {

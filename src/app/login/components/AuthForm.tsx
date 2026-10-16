@@ -28,6 +28,31 @@ interface SignupFormData {
   agreeTerms: boolean;
 }
 
+const SAFE_REDIRECT_STATIC_PATHS = ['/dashboard-home', '/deals', '/documents', '/profile'];
+const SAFE_REDIRECT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// redirectTo is browser-controlled. Returns a validated borrower portal path or null.
+// The value is expected to be already single-decoded by URLSearchParams; no further decoding is done.
+function getSafePortalRedirect(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 200) return null;
+  // control characters (incl. whitespace controls, DEL) and backslashes
+  if (/[\u0000-\u001F\u007F]/.test(raw)) return null;
+  if (raw.includes('\\')) return null;
+  // must start with exactly one "/"
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null;
+  // no scheme / absolute URL markers, no query strings, hashes or encoded chars
+  if (raw.includes('://') || raw.includes(':') || raw.includes('?') || raw.includes('#') || raw.includes('%')) return null;
+  const lower = raw.toLowerCase();
+  if (lower.startsWith('http:') || lower.startsWith('https:') || lower.startsWith('javascript:') || lower.startsWith('data:')) return null;
+
+  if (SAFE_REDIRECT_STATIC_PATHS.includes(raw)) return raw;
+
+  const dealMatch = /^\/deals\/([^/]+)$/.exec(raw);
+  if (dealMatch && SAFE_REDIRECT_UUID_RE.test(dealMatch[1])) return raw;
+
+  return null;
+}
+
 
 export default function AuthForm() {
   const [mode, setMode] = useState<AuthMode>('login');
@@ -56,7 +81,13 @@ export default function AuthForm() {
       // Redirect admins to admin panel, borrowers to dashboard
       // Trust ONLY app_metadata.role — user_metadata is user-editable and must not grant Admin routing
       const role = result?.user?.app_metadata?.role;
-      const redirectPath = role === 'admin' ? '/admin' : '/dashboard-home';
+      let redirectPath = '/dashboard-home';
+      if (role === 'admin') {
+        redirectPath = '/admin';
+      } else {
+        const rawRedirect = new URLSearchParams(window.location.search).get('redirectTo');
+        redirectPath = getSafePortalRedirect(rawRedirect) ?? '/dashboard-home';
+      }
       setTimeout(() => router.push(redirectPath), 600);
     } catch (err: any) {
       const msg = err?.message || 'Invalid email or password';
