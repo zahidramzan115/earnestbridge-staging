@@ -301,6 +301,64 @@ function wrapText(
 }
 
 // ---------------------------------------------------------------------------
+// Safe wrapping — wrapText + deterministic character-level fallback for
+// unbroken tokens wider than maxWidth. Never truncates; never overflows.
+// ---------------------------------------------------------------------------
+
+function wrapTextSafe(
+  text: string,
+  font: PDFFont,
+  fontSize: number,
+  maxWidth: number,
+): string[] {
+  const baseLines = wrapText(text, font, fontSize, maxWidth);
+  const result: string[] = [];
+
+  for (const line of baseLines) {
+    if (font.widthOfTextAtSize(line, fontSize) <= maxWidth) {
+      result.push(line);
+      continue;
+    }
+
+    // Line is a single over-wide token (or contains one) — break by character.
+    // Re-split on spaces so normal words stay intact where possible.
+    const words = line.split(' ');
+    let current = '';
+    for (const word of words) {
+      if (!word) continue;
+      const candidate = current ? `${current} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
+        current = candidate;
+        continue;
+      }
+      if (current) {
+        result.push(current);
+        current = '';
+      }
+      if (font.widthOfTextAtSize(word, fontSize) <= maxWidth) {
+        current = word;
+        continue;
+      }
+      // Character-level split of an over-wide word
+      let chunk = '';
+      for (const ch of Array.from(word)) {
+        const next = chunk + ch;
+        if (chunk && font.widthOfTextAtSize(next, fontSize) > maxWidth) {
+          result.push(chunk);
+          chunk = ch;
+        } else {
+          chunk = next;
+        }
+      }
+      current = chunk;
+    }
+    if (current) result.push(current);
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Main renderer — pure function, deterministic output
 // ---------------------------------------------------------------------------
 
@@ -418,7 +476,19 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
 
   // ── 2. PAYMENT HERO CARD ──────────────────────────────────────────────────
   // Status badge + PAYMENT RECEIVED + large amount + date · method + reference
-  const HERO_CARD_H = 100;
+  const refTrimmed = input.payment_reference_number?.trim() ?? '';
+  const hasReference = refTrimmed !== '';
+
+  // Hero reference: wrap within the card's inner width (card width minus 16pt padding each side)
+  const HERO_REF_SIZE = 7.5;
+  const HERO_REF_LINE_H = 10;
+  const HERO_INNER_W = CW - 32;
+  const heroRefLines: string[] = hasReference
+    ? wrapTextSafe(`Reference: ${refTrimmed}`, font, HERO_REF_SIZE, HERO_INNER_W)
+    : [];
+  const HERO_BASE_H = 100;
+  const HERO_EXTRA_H = heroRefLines.length > 1 ? (heroRefLines.length - 1) * HERO_REF_LINE_H : 0;
+  const HERO_CARD_H = HERO_BASE_H + HERO_EXTRA_H;
   const HERO_CARD_Y = y - HERO_CARD_H;
 
   page.drawRectangle({
@@ -481,12 +551,15 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
   });
 
   // Reference (if present)
-  if (input.payment_reference_number && input.payment_reference_number.trim() !== '') {
-    const refY = dateMethodY - 12;
-    page.drawText(`Reference: ${input.payment_reference_number.trim()}`, {
-      x: ML + 16, y: refY,
-      size: 7.5, font, color: C_LIGHT,
-    });
+  if (heroRefLines.length > 0) {
+    let refY = dateMethodY - 12;
+    for (const refLine of heroRefLines) {
+      page.drawText(refLine, {
+        x: ML + 16, y: refY,
+        size: HERO_REF_SIZE, font, color: C_LIGHT,
+      });
+      refY -= HERO_REF_LINE_H;
+    }
   }
 
   y = HERO_CARD_Y - 12;
@@ -494,9 +567,34 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
   // ── 3. TWO SIDE-BY-SIDE INFO CARDS ────────────────────────────────────────
   // LEFT — INVOICE card
   // RIGHT — PAYMENT card
-  const INFO_CARD_H = 72;
   const INFO_CARD_GAP = 10;
   const INFO_CARD_W = (CW - INFO_CARD_GAP) / 2;
+
+  // Content-aware height. Column heights are measured from the card top to the
+  // bottom of the last baseline, plus the bottom padding implied by the
+  // original design (72pt card vs. 64pt of content = 8pt).
+  const INFO_CARD_MIN_H = 72;
+  const INFO_CARD_BOTTOM_PAD = 8;
+  const INFO_INNER_W = INFO_CARD_W - 24; // 12pt padding each side
+  const PAY_REF_LINE_H = 11;
+
+  // INVOICE column: title(14) + label(14) + value(11) + gap(14) + label(11) + value => 64pt to last baseline
+  const invoiceColContentH = 14 + 14 + 11 + 14 + 11;
+
+  // PAYMENT column: same base rows as INVOICE, plus optional Reference block
+  const payRefLines: string[] = hasReference
+    ? wrapTextSafe(refTrimmed, fontBold, 8.5, INFO_INNER_W)
+    : [];
+  const paymentBaseContentH = 14 + 14 + 11 + 14 + 11; // title, Received, Method rows (last baseline)
+  const paymentColContentH =
+    payRefLines.length > 0
+      ? paymentBaseContentH + 14 + 11 + (payRefLines.length - 1) * PAY_REF_LINE_H
+      : paymentBaseContentH;
+
+  const INFO_CARD_H = Math.max(
+    INFO_CARD_MIN_H,
+    Math.max(invoiceColContentH, paymentColContentH) + INFO_CARD_BOTTOM_PAD,
+  );
   const INFO_CARD_Y = y - INFO_CARD_H;
 
   const LEFT_CARD_X = ML;
@@ -545,10 +643,13 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
   page.drawText(formatPaymentMethod(input.payment_method), { x: RC_INNER_X, y: rcY, size: 8.5, font: fontBold, color: C_DARK });
   rcY -= 14;
 
-  if (input.payment_reference_number && input.payment_reference_number.trim() !== '') {
+  if (payRefLines.length > 0) {
     page.drawText('Reference', { x: RC_INNER_X, y: rcY, size: 7.5, font, color: C_MEDIUM });
     rcY -= 11;
-    page.drawText(input.payment_reference_number.trim(), { x: RC_INNER_X, y: rcY, size: 8.5, font: fontBold, color: C_DARK });
+    for (let i = 0; i < payRefLines.length; i++) {
+      page.drawText(payRefLines[i], { x: RC_INNER_X, y: rcY, size: 8.5, font: fontBold, color: C_DARK });
+      if (i < payRefLines.length - 1) rcY -= PAY_REF_LINE_H;
+    }
   }
 
   y = INFO_CARD_Y - 12;
@@ -749,6 +850,16 @@ export async function renderReceiptPdf(input: ReceiptPdfInput): Promise<Uint8Arr
       size: 8, font, color: C_MEDIUM,
     });
     y -= 12;
+  }
+
+  // Overflow guard: content must stay above the footer rule (FOOTER_Y + 14).
+  // The payment API caps reference_number at 255 chars, which always fits; this
+  // is a defensive backstop so content is never silently overlapped or clipped.
+  if (y < SAFE_BOT + 14 + 14 + 4) {
+    throw new ReceiptPdfError(
+      'RECEIPT_PDF_CONTENT_OVERFLOW',
+      'Receipt content does not fit on a single page.',
+    );
   }
 
   // ── 7. FOOTER ─────────────────────────────────────────────────────────────
