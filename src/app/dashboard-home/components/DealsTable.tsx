@@ -260,7 +260,7 @@ export default function DealsTable() {
                 { label: 'Purchase Price', key: 'purchasePrice' as SortKey },
                 { label: 'Status', key: 'status' as SortKey },
                 { label: 'Submitted', key: 'submittedDate' as SortKey },
-                { label: 'Closing Date', key: 'closingDate' as SortKey },
+                { label: 'Target Closing', key: 'closingDate' as SortKey },
                 { label: 'Actions', key: null },
               ].map((col, i) => (
                 <th
@@ -314,9 +314,6 @@ export default function DealsTable() {
               paged.map((deal) => {
                 const isDraft = deal.status === 'draft';
                 const isActiveDeal = ['approved', 'funded', 'closed'].includes(deal.status);
-                const daysToClose = deal.closingDate
-                  ? Math.ceil((new Date(deal.closingDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-                  : null;
                 return (
                   <tr
                     key={`row-${deal.id}`}
@@ -367,11 +364,6 @@ export default function DealsTable() {
                           <span className="text-xs text-gray-600 tabular-nums whitespace-nowrap">
                             {formatDateStable(deal.closingDate)}
                           </span>
-                          {daysToClose !== null && !['closed', 'expired'].includes(deal.status) && daysToClose >= 0 && (
-                            <p className={`text-[11px] mt-0.5 tabular-nums ${daysToClose <= 7 ? 'text-amber-600 font-600' : daysToClose <= 14 ? 'text-blue-500' : 'text-gray-400'}`}>
-                              {daysToClose === 0 ? 'Today' : `${daysToClose}d left`}
-                            </p>
-                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-gray-300">—</span>

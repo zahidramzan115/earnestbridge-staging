@@ -102,13 +102,6 @@ function formatDate(dateStr: string | null) {
   return `${months[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y}`;
 }
 
-function getDaysUntil(dateStr: string | null): number | null {
-  if (!dateStr) return null;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const target = new Date(dateStr); target.setHours(0,0,0,0);
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
-}
-
 // ─── Mini Stepper for card ────────────────────────────────────────────────────
 
 function MiniWorkflowStepper({ deal }: { deal: Deal }) {
@@ -347,9 +340,6 @@ export default function BorrowerDealsContent() {
         <div className="space-y-3">
           {filtered.map(deal => {
             const cfg = STATUS_CONFIG[deal.app_status] ?? STATUS_CONFIG.application;
-            const daysLeft = getDaysUntil(deal.closing_date);
-            const isOverdue = daysLeft !== null && daysLeft < 0;
-            const isUrgent = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
             const isActiveDeal = isDealStatus(deal.app_status);
 
             return (
@@ -389,14 +379,9 @@ export default function BorrowerDealsContent() {
                           <p className="font-display font-700 text-gray-900">{formatCurrency(deal.deposit_amount)}</p>
                         </div>
                         <div>
-                          <span className="text-xs text-gray-400">Closing Date</span>
-                          <p className={`font-display font-700 ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-gray-900'}`}>
+                          <span className="text-xs text-gray-400">Target Closing</span>
+                          <p className="font-display font-700 text-gray-900">
                             {formatDate(deal.closing_date)}
-                            {daysLeft !== null && deal.app_status !== 'closed' && (
-                              <span className="ml-1 text-xs font-400">
-                                ({isOverdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
-                              </span>
-                            )}
                           </p>
                         </div>
                       </div>

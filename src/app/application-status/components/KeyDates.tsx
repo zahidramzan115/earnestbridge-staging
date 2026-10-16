@@ -14,14 +14,7 @@ function formatDate(dateStr: string) {
   return `${weekdays[date.getDay()]}, ${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
 }
 
-function daysUntil(dateStr: string): number {
-  const today = new Date('2026-04-10');
-  return Math.ceil((new Date(dateStr).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-}
-
 export default function KeyDates({ application }: KeyDatesProps) {
-  const daysToClose = daysUntil(application.closingDate);
-
   return (
     <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-6 space-y-5">
       <h3 className="font-display font-600 text-gray-900">Key Dates</h3>
@@ -54,29 +47,14 @@ export default function KeyDates({ application }: KeyDatesProps) {
           </div>
         )}
 
-        {/* Closing date */}
-        <div className={`flex items-start gap-3 p-3 rounded-xl ${
-          daysToClose <= 7 && !['closed', 'expired'].includes(application.status) ? 'bg-amber-50' : 'bg-gray-50'
-        }`}>
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-            daysToClose <= 7 && !['closed', 'expired'].includes(application.status) ? 'bg-amber-100' : 'bg-gray-100'
-          }`}>
-            <Icon name="CalendarDaysIcon" size={14} className={
-              daysToClose <= 7 && !['closed', 'expired'].includes(application.status) ? 'text-amber-600' : 'text-gray-500'
-            } />
+        {/* Target closing date (informational only) */}
+        <div className="flex items-start gap-3 p-3 rounded-xl bg-gray-50">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-100">
+            <Icon name="CalendarDaysIcon" size={14} className="text-gray-500" />
           </div>
           <div>
-            <p className={`text-[11px] font-display font-600 uppercase tracking-wide ${
-              daysToClose <= 7 && !['closed', 'expired'].includes(application.status) ? 'text-amber-600' : 'text-gray-400'
-            }`}>Target Closing Date</p>
-            <p className={`text-sm font-medium mt-0.5 ${
-              daysToClose <= 7 && !['closed', 'expired'].includes(application.status) ? 'text-amber-800' : 'text-gray-800'
-            }`}>{formatDate(application.closingDate)}</p>
-            {!['closed', 'expired'].includes(application.status) && daysToClose >= 0 && (
-              <p className={`text-xs mt-0.5 font-600 ${daysToClose <= 7 ? 'text-amber-600' : 'text-gray-400'}`}>
-                {daysToClose === 0 ? 'Closing today' : `${daysToClose} days remaining`}
-              </p>
-            )}
+            <p className="text-[11px] font-display font-600 uppercase tracking-wide text-gray-400">Target Closing Date</p>
+            <p className="text-sm font-medium mt-0.5 text-gray-800">{formatDate(application.closingDate)}</p>
           </div>
         </div>
       </div>

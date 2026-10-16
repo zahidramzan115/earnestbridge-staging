@@ -195,13 +195,6 @@ function invoiceStatusStyle(status: string): string {
   }
 }
 
-function getDaysUntil(dateStr: string | null): number | null {
-  if (!dateStr) return null;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const target = new Date(dateStr); target.setHours(0,0,0,0);
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -598,9 +591,6 @@ export default function DealDetailsContent() {
   if (!deal) return null;
 
   const cfg = STATUS_CONFIG[deal.app_status] ?? STATUS_CONFIG.approved;
-  const daysLeft = getDaysUntil(deal.closing_date);
-  const isOverdue = daysLeft !== null && daysLeft < 0;
-  const isUrgent = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
   const dealLabel = deal.company_name || deal.property_address || `Deal ${deal.id.slice(0, 6)}`;
 
   const isOwner = accessMode === 'owner';
@@ -688,14 +678,9 @@ export default function DealDetailsContent() {
             <p className="text-sm font-700 text-eb-green-900 tabular-nums">{formatCurrency(deal.deposit_amount)}</p>
           </div>
           <div>
-            <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Closing Date</p>
-            <p className={`text-sm font-700 tabular-nums ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-gray-900'}`}>
+            <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Target Closing</p>
+            <p className="text-sm font-700 tabular-nums text-gray-900">
               {formatDate(deal.closing_date)}
-              {daysLeft !== null && deal.app_status !== 'closed' && (
-                <span className="ml-1 text-xs font-400">
-                  ({isOverdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
-                </span>
-              )}
             </p>
           </div>
           <div>
