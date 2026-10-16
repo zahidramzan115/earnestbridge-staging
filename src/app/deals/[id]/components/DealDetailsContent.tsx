@@ -44,6 +44,49 @@ interface AdminFeedback {
   feedback_type?: string;
 }
 
+type PortalOptionStatus =
+  | 'action_required' |'extension_in_process' |'extension_requirements_received' |'option_exercised';
+
+interface PortalOptionCycle {
+  cycle_number: number;
+  deposit_goes_hard_date: string;
+  option_exercise_deadline: string;
+  option_deadline_cutoff_display: string;
+  client_status: PortalOptionStatus;
+  has_timely_amendment: boolean;
+  extension_fee_paid: boolean;
+}
+
+const OPTION_STATUS_UI: Record<PortalOptionStatus, { label: string; chip: string; guidance: string }> = {
+  action_required: {
+    label: 'Action Required',
+    chip: 'bg-amber-50 text-amber-700 border-amber-200',
+    guidance: 'Complete any required option or extension action by the Option Exercise Deadline.',
+  },
+  extension_in_process: {
+    label: 'Extension in Process',
+    chip: 'bg-blue-50 text-blue-700 border-blue-200',
+    guidance: 'Your signed amendment has been received. The Extension Deal Fee is still pending.',
+  },
+  extension_requirements_received: {
+    label: 'Extension Requirements Received',
+    chip: 'bg-teal-50 text-teal-700 border-teal-200',
+    guidance: 'Your signed amendment and Extension Deal Fee have been received.',
+  },
+  option_exercised: {
+    label: 'Option Exercised',
+    chip: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    guidance: 'Your option exercise has been recorded.',
+  },
+};
+
+// Whole calendar days from `todayYmd` to `deadlineYmd` (both YYYY-MM-DD).
+function calendarDaysBetween(todayYmd: string, deadlineYmd: string): number {
+  const [ty, tm, td] = todayYmd.split('-').map(Number);
+  const [dy, dm, dd] = deadlineYmd.split('-').map(Number);
+  return Math.round((Date.UTC(dy, dm - 1, dd) - Date.UTC(ty, tm - 1, td)) / 86400000);
+}
+
 interface BorrowerDoc {
   id: string;
   document_name: string;
@@ -411,6 +454,8 @@ export default function DealDetailsContent() {
   const supabase = useMemo(() => createClient(), []);
 
   const [deal, setDeal] = useState<Deal | null>(null);
+  const [optionCycle, setOptionCycle] = useState<PortalOptionCycle | null>(null);
+  const [todayEt, setTodayEt] = useState<string | null>(null);
   const [accessMode, setAccessMode] = useState<'owner' | 'contact' | null>(null);
   const [loading, setLoading] = useState(true);
   const [adminFeedback, setAdminFeedback] = useState<AdminFeedback[]>([]);
@@ -446,6 +491,7 @@ export default function DealDetailsContent() {
       }
       setAccessMode(json.access_mode as 'owner' | 'contact');
       setDeal(json.deal as Deal);
+      setOptionCycle((json.option_cycle as PortalOptionCycle | null) ?? null);
       setLoading(false);
     } catch {
       if (requestId !== dealRequestRef.current) return;
@@ -561,6 +607,11 @@ export default function DealDetailsContent() {
   useEffect(() => {
     if (activeTab === 'invoices' && deal) fetchInvoices();
   }, [activeTab, deal, fetchInvoices]);
+
+  // Today's date in America/New_York (client-only, avoids hydration mismatch)
+  useEffect(() => {
+    setTodayEt(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()));
+  }, []);
 
   // Real-time deal status updates (owner access only; contact-only users use the
   // server-loaded snapshot because the Realtime stream is owner-RLS scoped).
@@ -765,6 +816,64 @@ export default function DealDetailsContent() {
               </div>
             </div>
           </div>
+
+          {/* Funding & Option — shown to owner and approved contact when an active cycle exists */}
+          {optionCycle && (() => {
+            const statusUi = OPTION_STATUS_UI[optionCycle.client_status] ?? OPTION_STATUS_UI.action_required;
+            const exercised = optionCycle.client_status === 'option_exercised';
+            const daysLeft = todayEt ? calendarDaysBetween(todayEt, optionCycle.option_exercise_deadline) : null;
+            const showUrgency = !exercised && daysLeft !== null && daysLeft <= 7;
+            const countdown =
+              exercised || daysLeft === null
+                ? null
+                : daysLeft > 1
+                  ? `${daysLeft} days remaining`
+                  : daysLeft === 1
+                    ? '1 day remaining'
+                    : daysLeft === 0
+                      ? 'Due today — 5:00 PM ET' :'Deadline passed';
+            const urgent = !exercised && daysLeft !== null && daysLeft <= 0;
+            return (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Icon name="ClockIcon" size={15} className="text-gray-500" />
+                  <h3 className="font-display font-700 text-gray-900 text-sm">Funding &amp; Option</h3>
+                  <span className={`ml-auto inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-display font-700 ${statusUi.chip}`}>
+                    {statusUi.label}
+                  </span>
+                </div>
+
+                <div
+                  className={`rounded-xl border p-4 ${
+                    exercised
+                      ? 'bg-emerald-50 border-emerald-200'
+                      : urgent
+                        ? 'bg-red-50 border-red-200'
+                        : showUrgency
+                          ? 'bg-amber-50 border-amber-200' :'bg-indigo-50 border-indigo-200'
+                  }`}
+                >
+                  <p className="text-[11px] text-gray-500 font-display font-700 uppercase tracking-wide mb-1">Option Exercise Deadline</p>
+                  <p className="text-xl font-display font-800 tabular-nums text-gray-900">
+                    {formatDateSafe(optionCycle.option_exercise_deadline)}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-0.5">Cutoff: 5:00 PM ET</p>
+                  {countdown && (
+                    <p className={`text-sm font-display font-700 mt-2 ${urgent ? 'text-red-700' : showUrgency ? 'text-amber-700' : 'text-indigo-700'}`}>
+                      {countdown}
+                    </p>
+                  )}
+                </div>
+
+                <p className="text-sm text-gray-600 mt-3">{statusUi.guidance}</p>
+
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Deposit Goes Hard</p>
+                  <p className="text-sm font-600 tabular-nums text-gray-700">{formatDateSafe(optionCycle.deposit_goes_hard_date)}</p>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Deal details */}
           {(deal.llc_name || deal.transaction_description) && (

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
+import { getOptionDeadlineCutoff } from '@/app/api/admin/option-cycles/route';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,87 @@ function notFound() {
     { error: 'deal_not_found' },
     { status: 404, headers: NO_STORE_HEADERS }
   );
+}
+
+// Client-safe option cycle projection (explicit allow-list; never a raw row).
+type ClientOptionStatus =
+  | 'action_required' |'extension_in_process' |'extension_requirements_received' |'option_exercised';
+
+interface PortalOptionCycle {
+  cycle_number: number;
+  deposit_goes_hard_date: string;
+  option_exercise_deadline: string;
+  option_deadline_cutoff_display: string;
+  client_status: ClientOptionStatus;
+  has_timely_amendment: boolean;
+  extension_fee_paid: boolean;
+}
+
+function formatOptionCutoffDisplay(deadlineDateStr: string): string {
+  const [y, m, d] = deadlineDateStr.split('-').map(Number);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[m - 1]} ${d}, ${y} at 5:00 PM ET`;
+}
+
+// Runs ONLY after the owner/contact authorization check has succeeded.
+// Failures are non-fatal: the option card is optional, so we return null.
+async function loadPortalOptionCycle(
+  supabase: ReturnType<typeof getServiceClient>,
+  dealId: string
+): Promise<PortalOptionCycle | null> {
+  try {
+    const { data: rows, error } = await supabase
+      .from('crm_deal_option_cycles')
+      .select(
+        'cycle_number, deposit_goes_hard_date, option_exercise_deadline, status, actual_option_exercised_at, option_exercised_at, actual_amendment_received_at, extension_psa_amendment_received_at, extension_fee_paid_at'
+      )
+      .eq('application_id', dealId)
+      .eq('status', 'active')
+      .order('cycle_number', { ascending: false })
+      .limit(1);
+
+    if (error || !rows || rows.length === 0) return null;
+    const row = rows[0] as {
+      cycle_number: number;
+      deposit_goes_hard_date: string | null;
+      option_exercise_deadline: string | null;
+      actual_option_exercised_at: string | null;
+      option_exercised_at: string | null;
+      actual_amendment_received_at: string | null;
+      extension_psa_amendment_received_at: string | null;
+      extension_fee_paid_at: string | null;
+    };
+
+    if (!row.option_exercise_deadline || !row.deposit_goes_hard_date) return null;
+
+    // Same cutoff rule as /api/client/deadlines (5:00 PM ET on the deadline date).
+    const amendmentTs = row.actual_amendment_received_at ?? row.extension_psa_amendment_received_at;
+    let hasTimelyAmendment = false;
+    if (amendmentTs) {
+      const cutoff = getOptionDeadlineCutoff(row.option_exercise_deadline);
+      hasTimelyAmendment = new Date(amendmentTs).getTime() <= cutoff.getTime();
+    }
+
+    const feePaid = !!row.extension_fee_paid_at;
+    const exercised = !!(row.actual_option_exercised_at ?? row.option_exercised_at);
+
+    let clientStatus: ClientOptionStatus = 'action_required';
+    if (exercised) clientStatus = 'option_exercised';
+    else if (hasTimelyAmendment && feePaid) clientStatus = 'extension_requirements_received';
+    else if (hasTimelyAmendment) clientStatus = 'extension_in_process';
+
+    return {
+      cycle_number: row.cycle_number,
+      deposit_goes_hard_date: row.deposit_goes_hard_date,
+      option_exercise_deadline: row.option_exercise_deadline,
+      option_deadline_cutoff_display: formatOptionCutoffDisplay(row.option_exercise_deadline),
+      client_status: clientStatus,
+      has_timely_amendment: hasTimelyAmendment,
+      extension_fee_paid: feePaid,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Auth helpers (same inline pattern as the other portal routes) ─────────────
@@ -166,6 +248,9 @@ export async function GET(
 
     if (!accessMode) return notFound();
 
+    // ── Step 4b: Option cycle (only after authorization has succeeded) ──────
+    const optionCycle = await loadPortalOptionCycle(supabase, dealId);
+
     // ── Step 5: Allow-listed response (user_id is never returned) ───────────
     return NextResponse.json(
       {
@@ -187,6 +272,7 @@ export async function GET(
           llc_formed: application.llc_formed,
           psa_signed: application.psa_signed,
         },
+        option_cycle: optionCycle,
         access_mode: accessMode,
       },
       { status: 200, headers: NO_STORE_HEADERS }
