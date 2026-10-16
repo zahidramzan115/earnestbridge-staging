@@ -224,13 +224,7 @@ const DealDeadlinesSection: React.FC<DealDeadlinesSectionProps> = ({
     loadDeadlines();
   }, [loadDeadlines]);
 
-  // ── Closing date display ────────────────────────────────────────────────────
-
-  const closingDaysUntil = closingDate
-    ? getDaysUntil(closingDate)
-    : null;
-  const closingIsOverdue = closingDaysUntil !== null && closingDaysUntil < 0;
-  const closingIsUrgent = closingDaysUntil !== null && closingDaysUntil >= 0 && closingDaysUntil <= 7;
+  // NOTE: Target Closing (closing_date) is informational only — no countdown or urgency state.
 
   // ── Form handlers ───────────────────────────────────────────────────────────
 
@@ -404,41 +398,22 @@ const DealDeadlinesSection: React.FC<DealDeadlinesSectionProps> = ({
         </button>
       </div>
 
-      {/* ── Closing Date (canonical) ──────────────────────────────────────── */}
-      <div className={`rounded-xl border p-4 ${
-        closingIsOverdue ? 'bg-red-50 border-red-200' : closingIsUrgent  ?'bg-amber-50 border-amber-200': closingDate      ?'bg-gray-50 border-gray-200': 'bg-gray-50 border-gray-200'
-      }`}>
+      {/* ── Target Closing (informational) ────────────────────────────────── */}
+      <div className="rounded-xl border p-4 bg-gray-50 border-gray-200">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-              closingIsOverdue ? 'bg-red-100' : closingIsUrgent ? 'bg-amber-100' : 'bg-gray-200'
-            }`}>
-              <Icon name="HomeModernIcon" size={15} className={
-                closingIsOverdue ? 'text-red-600' : closingIsUrgent ? 'text-amber-600' : 'text-gray-500'
-              } />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-200">
+              <Icon name="HomeModernIcon" size={15} className="text-gray-500" />
             </div>
             <div>
-              <p className="text-xs font-display font-700 text-gray-900">Closing Date</p>
-              <p className={`text-sm font-display font-700 mt-0.5 ${
-                closingIsOverdue ? 'text-red-700' : closingIsUrgent ? 'text-amber-700' : 'text-gray-700'
-              }`}>
+              <p className="text-xs font-display font-700 text-gray-900">Target Closing</p>
+              <p className="text-sm font-display font-700 mt-0.5 text-gray-700">
                 {closingDate ? formatDate(closingDate) : 'Not set'}
               </p>
-              {closingDaysUntil !== null && closingDate && (
-                <p className={`text-[11px] font-600 mt-0.5 ${
-                  closingIsOverdue ? 'text-red-500' : closingIsUrgent ? 'text-amber-500' : 'text-gray-400'
-                }`}>
-                  {closingIsOverdue
-                    ? `${Math.abs(closingDaysUntil)} day${Math.abs(closingDaysUntil) !== 1 ? 's' : ''} overdue`
-                    : closingDaysUntil === 0
-                    ? 'Due today'
-                    : `${closingDaysUntil} day${closingDaysUntil !== 1 ? 's' : ''} remaining`}
-                </p>
-              )}
             </div>
           </div>
           <span className="text-[10px] font-600 text-gray-400 bg-white border border-gray-200 px-2 py-1 rounded-lg flex-shrink-0">
-            Canonical Deal date
+            Informational
           </span>
         </div>
       </div>

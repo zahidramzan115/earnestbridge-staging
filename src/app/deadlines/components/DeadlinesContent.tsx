@@ -228,7 +228,8 @@ function OptionCycleCard({ item }: { item: DisplayDeadline }) {
 // ─── Deadline Card ────────────────────────────────────────────────────────────
 
 function DeadlineCard({ item }: { item: DisplayDeadline }) {
-  const state = item.derivedState;
+  // Target Closing is informational only — neutral styling, no countdown/urgency.
+  const state = item.isClosing ? (item.derivedState === 'completed' ? 'completed' : 'informational') : item.derivedState;
 
   const stateConfig = {
     overdue: {
@@ -249,6 +250,11 @@ function DeadlineCard({ item }: { item: DisplayDeadline }) {
       numColor: item.daysLeft <= 7 ? 'text-amber-600' : 'text-blue-600',
       numBg: item.daysLeft <= 7 ? 'bg-amber-100' : 'bg-blue-100',
     },
+    informational: {
+      border: 'border-gray-200', bg: 'bg-gray-50',
+      badge: 'bg-gray-100 text-gray-600', badgeLabel: 'Informational',
+      numColor: 'text-gray-500', numBg: 'bg-gray-100',
+    },
     completed: {
       border: 'border-gray-200', bg: 'bg-gray-50',
       badge: 'bg-emerald-100 text-emerald-700', badgeLabel: 'Completed',
@@ -259,7 +265,9 @@ function DeadlineCard({ item }: { item: DisplayDeadline }) {
   return (
     <div className={`rounded-2xl border ${stateConfig.border} ${stateConfig.bg} p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start gap-4 transition-all`}>
       <div className={`w-14 h-14 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${stateConfig.numBg} border ${stateConfig.border}`}>
-        {state === 'overdue' ? (
+        {state === 'informational' ? (
+          <Icon name="HomeModernIcon" size={22} className={stateConfig.numColor} />
+        ) : state === 'overdue' ? (
           <><Icon name="ExclamationTriangleIcon" size={18} className={stateConfig.numColor} /><span className={`text-[9px] font-700 uppercase mt-0.5 ${stateConfig.numColor}`}>Overdue</span></>
         ) : state === 'today' ? (
           <><span className={`text-xl font-display font-800 leading-none ${stateConfig.numColor}`}>!</span><span className={`text-[9px] font-700 uppercase mt-0.5 ${stateConfig.numColor}`}>Today</span></>
@@ -274,9 +282,6 @@ function DeadlineCard({ item }: { item: DisplayDeadline }) {
         <div className="flex flex-wrap items-center gap-2 mb-1">
           <h3 className="font-display font-700 text-gray-900 text-sm sm:text-base leading-tight">{item.title}</h3>
           <span className={`text-[10px] font-display font-700 px-2 py-0.5 rounded-full ${stateConfig.badge}`}>{stateConfig.badgeLabel}</span>
-          {item.isClosing && (
-            <span className="text-[10px] font-display font-600 px-2 py-0.5 rounded-full bg-eb-green-100 text-eb-green-800">Closing Date</span>
-          )}
         </div>
         {item.deal_display_name && (
           <p className="text-xs text-gray-500 truncate mb-1.5 flex items-center gap-1">
@@ -406,7 +411,7 @@ export default function DeadlinesContent() {
       items.push({
         key: `closing-${c.application_id}`,
         application_id: c.application_id,
-        title: 'Closing Date',
+        title: 'Target Closing',
         due_date: c.due_date,
         responsible_party: 'system',
         status: c.status,

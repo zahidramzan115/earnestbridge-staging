@@ -3012,17 +3012,9 @@ const BorrowerDetailContent: React.FC = () => {
   const statusCfg = STATUS_CONFIG[application.app_status] ?? STATUS_CONFIG.draft ?? { label: application.app_status ?? 'Unknown', color: 'text-gray-600', bg: 'bg-gray-100', border: 'border-gray-200' };
   const currentPhaseIdx = getPhaseIndexForStatus(application.app_status);
 
-  // ── NEW: Closing date urgency ──────────────────────────────────────────
-  const closingDaysUntil = application.closing_date
-    ? Math.ceil((new Date(application.closing_date).getTime() - new Date().setHours(0,0,0,0)) / 86400000)
-    : null;
-  const closingIsOverdue = closingDaysUntil !== null && closingDaysUntil < 0;
-  const closingIsUrgent = closingDaysUntil !== null && closingDaysUntil >= 0 && closingDaysUntil <= 7;
-
-  // ── NEW: Attention items ───────────────────────────────────────────────
+  // ── Attention items ────────────────────────────────────────────────────
+  // NOTE: Target Closing (closing_date) is informational only and does not generate attention items.
   const attentionItems: string[] = [];
-  if (closingIsOverdue) attentionItems.push('Closing date passed');
-  else if (closingIsUrgent) attentionItems.push(`Closing in ${closingDaysUntil}d`);
   if (!application.eb_assigned_owner) attentionItems.push('No assigned owner');
   const overdueTaskCount = openTasks.filter(t => {
     if (!t.due_date) return false;
@@ -3174,23 +3166,10 @@ const BorrowerDetailContent: React.FC = () => {
               </div>
             )}
 
-            {/* Closing Date */}
-            <div className={`border rounded-xl p-3 ${
-              closingIsOverdue ? 'bg-red-50 border-red-200' : closingIsUrgent ?'bg-amber-50 border-amber-200': 'bg-gray-50 border-gray-200'
-            }`}>
-              <p className={`text-[10px] font-700 uppercase tracking-wide mb-0.5 ${
-                closingIsOverdue ? 'text-red-600' : closingIsUrgent ? 'text-amber-600' : 'text-gray-500'
-              }`}>Closing</p>
-              <p className={`text-sm font-display font-700 ${
-                closingIsOverdue ? 'text-red-700' : closingIsUrgent ? 'text-amber-700' : 'text-gray-800'
-              }`}>{formatDate(application.closing_date)}</p>
-              {closingDaysUntil !== null && application.app_status !== 'closed' && (
-                <p className={`text-[10px] font-600 mt-0.5 ${
-                  closingIsOverdue ? 'text-red-500' : closingIsUrgent ? 'text-amber-500' : 'text-gray-400'
-                }`}>
-                  {closingIsOverdue ? `${Math.abs(closingDaysUntil)}d overdue` : `${closingDaysUntil}d left`}
-                </p>
-              )}
+            {/* Target Closing (informational only) */}
+            <div className="border rounded-xl p-3 bg-gray-50 border-gray-200">
+              <p className="text-[10px] font-700 uppercase tracking-wide mb-0.5 text-gray-500">Target Closing</p>
+              <p className="text-sm font-display font-700 text-gray-800">{formatDate(application.closing_date)}</p>
             </div>
 
             {/* Stage — inline editable */}

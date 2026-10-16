@@ -1,8 +1,3 @@
 {
-    "crons": [
-        {
-            "path": "/api/send-deadline-reminders",
-            "schedule": "0 9 * * *"
-        }
-    ]
+    "crons": []
 }

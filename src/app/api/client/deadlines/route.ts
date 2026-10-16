@@ -199,7 +199,7 @@ export async function GET() {
     .map((d: any) => ({
       type: 'closing' as const,
       application_id: d.id,
-      title: 'Closing Date',
+      title: 'Target Closing',
       due_date: d.closing_date,
       responsible_party: 'system' as const,
       status: (['closed', 'funded'].includes(d.app_status) ? 'completed' : 'open') as 'open' | 'completed',

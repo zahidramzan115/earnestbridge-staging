@@ -162,7 +162,7 @@ export default function DashboardDeadlineSummary() {
       .filter((c) => c.status === 'open')
       .map((c) => ({
         key: `closing-${c.application_id}`,
-        title: 'Closing Date',
+        title: 'Target Closing',
         due_date: c.due_date,
         responsible_party: 'system',
         deal_display_name: c.deal_display_name,
@@ -222,34 +222,37 @@ export default function DashboardDeadlineSummary() {
       {/* Items */}
       <div className="space-y-2.5">
         {displayItems.map((item) => {
-          const isOverdue = item.daysLeft < 0;
-          const isToday = item.daysLeft === 0;
-          const isUrgent = item.daysLeft > 0 && item.daysLeft <= 7;
+          // Target Closing is informational only — never overdue/urgent styling or countdown
+          const isOverdue = !item.isClosing && item.daysLeft < 0;
+          const isToday = !item.isClosing && item.daysLeft === 0;
+          const isUrgent = !item.isClosing && item.daysLeft > 0 && item.daysLeft <= 7;
 
           // Option cycle items get special indigo styling
           const numBg = item.isOptionCycle
             ? (isOverdue || isToday ? 'bg-red-50' : isUrgent ? 'bg-amber-50' : 'bg-indigo-50')
+            : item.isClosing
+            ? 'bg-gray-50'
             : isOverdue || isToday
             ? 'bg-red-50'
             : isUrgent
-            ? 'bg-amber-50'
-            : item.isClosing
-            ? 'bg-eb-green-50' : 'bg-blue-50';
+            ? 'bg-amber-50' :'bg-blue-50';
 
           const numColor = item.isOptionCycle
             ? (isOverdue || isToday ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-indigo-700')
+            : item.isClosing
+            ? 'text-gray-500'
             : isOverdue || isToday
             ? 'text-red-600'
             : isUrgent
-            ? 'text-amber-600'
-            : item.isClosing
-            ? 'text-eb-green-700' : 'text-blue-600';
+            ? 'text-amber-600' :'text-blue-600';
 
           return (
             <div key={item.key} className={`flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 ${item.isOptionCycle ? 'bg-indigo-50/30 rounded-lg px-2 -mx-2' : ''}`}>
               {/* Days counter */}
               <div className={`w-10 h-10 rounded-lg flex flex-col items-center justify-center flex-shrink-0 ${numBg}`}>
-                {isOverdue ? (
+                {item.isClosing ? (
+                  <Icon name="HomeModernIcon" size={16} className={numColor} />
+                ) : isOverdue ? (
                   <Icon name="ExclamationTriangleIcon" size={16} className={numColor} />
                 ) : isToday ? (
                   <span className={`text-base font-display font-800 leading-none ${numColor}`}>!</span>

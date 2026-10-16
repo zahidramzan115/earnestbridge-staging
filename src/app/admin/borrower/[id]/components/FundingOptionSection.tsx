@@ -388,7 +388,6 @@ function ActiveCycleCard({ cycle, onExercise, onAmendmentReceived, onFeePaid, on
               : daysUntilDeadline === 0
               ? 'Due today'
               : `${daysUntilDeadline} day${daysUntilDeadline !== 1 ? 's' : ''} remaining`}
-            {' · '}2 business days before funds go hard
           </p>
         </div>
       </div>
