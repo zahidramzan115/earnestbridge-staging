@@ -45,7 +45,7 @@ interface AdminFeedback {
 }
 
 type PortalOptionStatus =
-  | 'action_required' |'extension_in_process' |'extension_requirements_received' |'option_exercised';
+  | 'action_required' |'extension_in_process' |'extension_requirements_received' |'option_exercised' |'deadline_not_met';
 
 interface PortalOptionCycle {
   cycle_number: number;
@@ -56,6 +56,9 @@ interface PortalOptionCycle {
   has_timely_amendment: boolean;
   extension_fee_paid: boolean;
 }
+
+const DEADLINE_NOT_MET_DESCRIPTION =
+  'The Option Exercise Deadline was not completed, so this deal has been closed in EarnestBridge. Contact EarnestBridge if you believe required extension documentation was submitted.';
 
 const OPTION_STATUS_UI: Record<PortalOptionStatus, { label: string; chip: string; guidance: string }> = {
   action_required: {
@@ -77,6 +80,11 @@ const OPTION_STATUS_UI: Record<PortalOptionStatus, { label: string; chip: string
     label: 'Option Exercised',
     chip: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     guidance: 'Your option exercise has been recorded.',
+  },
+  deadline_not_met: {
+    label: 'Deadline Not Met',
+    chip: 'bg-gray-100 text-gray-700 border-gray-200',
+    guidance: DEADLINE_NOT_MET_DESCRIPTION,
   },
 };
 
@@ -668,7 +676,12 @@ export default function DealDetailsContent() {
 
   if (!deal) return null;
 
-  const cfg = STATUS_CONFIG[deal.app_status] ?? STATUS_CONFIG.approved;
+  const baseCfg = STATUS_CONFIG[deal.app_status] ?? STATUS_CONFIG.approved;
+  // Only a closed Deal with a missed option cycle gets the "Deadline Not Met" presentation.
+  const cfg =
+    deal.app_status === 'closed' && optionCycle?.client_status === 'deadline_not_met'
+      ? { ...baseCfg, label: 'Deadline Not Met', description: DEADLINE_NOT_MET_DESCRIPTION }
+      : baseCfg;
   const dealLabel = deal.company_name || deal.property_address || `Deal ${deal.id.slice(0, 6)}`;
 
   const isOwner = accessMode === 'owner';
@@ -848,13 +861,14 @@ export default function DealDetailsContent() {
           {optionCycle && (() => {
             const statusUi = OPTION_STATUS_UI[optionCycle.client_status] ?? OPTION_STATUS_UI.action_required;
             const exercised = optionCycle.client_status === 'option_exercised';
+            const missed = optionCycle.client_status === 'deadline_not_met';
             const rawDaysLeft = etNow ? calendarDaysBetween(etNow.ymd, optionCycle.option_exercise_deadline) : null;
             // On the deadline date itself, at/after 5:00 PM ET the deadline has passed.
             const daysLeft =
               rawDaysLeft === 0 && etNow && etNow.minutes >= OPTION_CUTOFF_MINUTES_ET ? -1 : rawDaysLeft;
-            const showUrgency = !exercised && daysLeft !== null && daysLeft <= 7;
+            const showUrgency = !exercised && !missed && daysLeft !== null && daysLeft <= 7;
             const countdown =
-              exercised || daysLeft === null
+              exercised || missed || daysLeft === null
                 ? null
                 : daysLeft > 1
                   ? `${daysLeft} days remaining`
@@ -862,7 +876,7 @@ export default function DealDetailsContent() {
                     ? '1 day remaining'
                     : daysLeft === 0
                       ? 'Due today — 5:00 PM ET' :'Deadline passed';
-            const urgent = !exercised && daysLeft !== null && daysLeft <= 0;
+            const urgent = !exercised && !missed && daysLeft !== null && daysLeft <= 0;
             return (
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                 <div className="flex items-center gap-2 mb-4">
@@ -875,7 +889,9 @@ export default function DealDetailsContent() {
 
                 <div
                   className={`rounded-xl border p-4 ${
-                    exercised
+                    missed
+                      ? 'bg-gray-50 border-gray-200'
+                      : exercised
                       ? 'bg-emerald-50 border-emerald-200'
                       : urgent
                         ? 'bg-red-50 border-red-200'
@@ -897,10 +913,12 @@ export default function DealDetailsContent() {
 
                 <p className="text-sm text-gray-600 mt-3">{statusUi.guidance}</p>
 
-                <div className="mt-4 pt-4 border-t border-gray-100">
-                  <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Deposit Goes Hard</p>
-                  <p className="text-sm font-600 tabular-nums text-gray-700">{formatDateSafe(optionCycle.deposit_goes_hard_date)}</p>
-                </div>
+                {!missed && (
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Deposit Goes Hard</p>
+                    <p className="text-sm font-600 tabular-nums text-gray-700">{formatDateSafe(optionCycle.deposit_goes_hard_date)}</p>
+                  </div>
+                )}
               </div>
             );
           })()}

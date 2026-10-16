@@ -38,7 +38,7 @@ interface ClientOptionCycleItem {
   // NOTE: deposit_goes_hard_date is intentionally absent — Admin only, never returned to client
   option_exercise_deadline: string;
   option_deadline_cutoff_display: string;
-  option_status: 'active' | 'exercised' | 'extended';
+  option_status: 'active' | 'exercised' | 'extended' | 'missed';
   has_timely_amendment: boolean;
   extension_fee_paid: boolean;
   option_exercised_at: string | null;
@@ -63,7 +63,7 @@ interface DisplayDeadline {
   // Option cycle specific
   // NOTE: depositGoesHardDate is intentionally absent — Admin only, never shown to client
   optionCutoffDisplay?: string;
-  optionStatus?: 'active' | 'exercised' | 'extended';
+  optionStatus?: 'active' | 'exercised' | 'extended' | 'missed';
   optionHasTimelyAmendment?: boolean;
   optionFeePaid?: boolean;
   depositGoesHardDate?: string | null;
@@ -88,7 +88,7 @@ function daysUntil(dateStr: string): number {
 }
 
 function derivedState(status: string, daysLeft: number): 'overdue' | 'today' | 'upcoming' | 'completed' {
-  if (status === 'completed' || status === 'exercised') return 'completed';
+  if (status === 'completed' || status === 'exercised' || status === 'missed') return 'completed';
   if (daysLeft < 0) return 'overdue';
   if (daysLeft === 0) return 'today';
   return 'upcoming';
@@ -114,6 +114,9 @@ function responsiblePartyStyle(rp: string): string {
 // Do NOT expose manual override policy.
 
 function getClientOptionStatusLabel(cycle: DisplayDeadline): { label: string; color: string; bg: string } {
+  if (cycle.optionStatus === 'missed') {
+    return { label: 'Deadline Not Met', color: 'text-gray-700', bg: 'bg-gray-100' };
+  }
   if (cycle.optionStatus === 'exercised') {
     return { label: 'Option Exercised', color: 'text-blue-700', bg: 'bg-blue-50' };
   }
@@ -137,11 +140,45 @@ function getClientOptionStatusLabel(cycle: DisplayDeadline): { label: string; co
 function OptionCycleCard({ item }: { item: DisplayDeadline }) {
   const state = item.derivedState;
   const statusInfo = getClientOptionStatusLabel(item);
+  const isMissed = item.optionStatus === 'missed';
   const isResolved = item.optionStatus === 'exercised' || (item.optionHasTimelyAmendment && item.optionFeePaid);
   const isExercised = item.optionStatus === 'exercised';
 
   const urgencyBorder = state === 'overdue' ? 'border-red-300' : state === 'today' ? 'border-red-200' : item.daysLeft <= 7 ? 'border-amber-200' : 'border-indigo-200';
   const urgencyBg = state === 'overdue' ? 'bg-red-50' : state === 'today' ? 'bg-red-50' : item.daysLeft <= 7 ? 'bg-amber-50' : 'bg-indigo-50';
+
+  if (isMissed) {
+    return (
+      <div className="rounded-2xl border-2 border-gray-200 bg-gray-50 p-4 sm:p-5 space-y-3">
+        <div className="flex flex-wrap items-start gap-2 justify-between">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+              <Icon name="ClockIcon" size={16} className="text-gray-500" />
+            </div>
+            <div>
+              <h3 className="font-display font-700 text-gray-900 text-sm sm:text-base leading-tight">Option Exercise Deadline</h3>
+              {item.deal_display_name && (
+                <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                  <Icon name="BuildingOffice2Icon" size={11} className="text-gray-400 flex-shrink-0" />
+                  {item.deal_display_name}
+                </p>
+              )}
+            </div>
+          </div>
+          <span className={`text-[11px] font-display font-700 px-2.5 py-1 rounded-full border border-gray-200 ${statusInfo.color} ${statusInfo.bg}`}>
+            {statusInfo.label}
+          </span>
+        </div>
+        <div className="bg-white/70 rounded-xl px-3 py-2.5 border border-white/50">
+          <p className="text-[10px] font-display font-600 text-gray-400 uppercase tracking-wide mb-0.5">Option Exercise Deadline</p>
+          <p className="text-sm font-display font-700 text-gray-700">{item.optionCutoffDisplay}</p>
+        </div>
+        <p className="text-[11px] text-gray-600 leading-relaxed">
+          The Option Exercise Deadline was not completed, so this deal has been closed in EarnestBridge. Contact EarnestBridge if you believe required extension documentation was submitted.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className={`rounded-2xl border-2 ${isResolved ? 'border-teal-200 bg-teal-50' : urgencyBorder + ' ' + urgencyBg} p-4 sm:p-5 space-y-3`}>
@@ -368,8 +405,8 @@ export default function DeadlinesContent() {
   const optionCycleItems = useMemo((): DisplayDeadline[] => {
     return optionCycles.map((oc) => {
       const dl = daysUntil(oc.option_exercise_deadline);
-      const isResolved = oc.option_status === 'exercised' || (oc.has_timely_amendment && oc.extension_fee_paid);
-      const statusStr = isResolved ? 'completed' : 'open';
+      const isResolved = oc.option_status === 'exercised' || oc.option_status === 'missed' || (oc.has_timely_amendment && oc.extension_fee_paid);
+      const statusStr = oc.option_status === 'missed' ? 'missed' : isResolved ? 'completed' : 'open';
       return {
         key: `option-cycle-${oc.id}`,
         application_id: oc.application_id,

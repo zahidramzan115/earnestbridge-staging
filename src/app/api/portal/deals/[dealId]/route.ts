@@ -27,7 +27,7 @@ function notFound() {
 
 // Client-safe option cycle projection (explicit allow-list; never a raw row).
 type ClientOptionStatus =
-  | 'action_required' |'extension_in_process' |'extension_requirements_received' |'option_exercised';
+  | 'action_required' |'extension_in_process' |'extension_requirements_received' |'option_exercised' |'deadline_not_met';
 
 interface PortalOptionCycle {
   cycle_number: number;
@@ -46,7 +46,7 @@ function formatOptionCutoffDisplay(deadlineDateStr: string): string {
 }
 
 // Runs ONLY after the owner/contact authorization check has succeeded.
-// Returns null ONLY when no client-visible (active/exercised) cycle exists.
+// Returns null ONLY when no client-visible (active/exercised/missed) cycle exists.
 // Database errors and malformed required data THROW so the caller returns a
 // safe server error instead of silently hiding a critical deadline.
 async function loadPortalOptionCycle(
@@ -59,7 +59,7 @@ async function loadPortalOptionCycle(
       'cycle_number, deposit_goes_hard_date, option_exercise_deadline, status, actual_option_exercised_at, option_exercised_at, actual_amendment_received_at, extension_psa_amendment_received_at, extension_fee_paid_at'
     )
     .eq('application_id', dealId)
-    .in('status', ['active', 'exercised'])
+    .in('status', ['active', 'exercised', 'missed'])
     .order('cycle_number', { ascending: false })
     .limit(1);
 
@@ -97,7 +97,8 @@ async function loadPortalOptionCycle(
     row.status === 'exercised' || !!(row.actual_option_exercised_at ?? row.option_exercised_at);
 
   let clientStatus: ClientOptionStatus = 'action_required';
-  if (exercised) clientStatus = 'option_exercised';
+  if (row.status === 'missed') clientStatus = 'deadline_not_met';
+  else if (exercised) clientStatus = 'option_exercised';
   else if (hasTimelyAmendment && feePaid) clientStatus = 'extension_requirements_received';
   else if (hasTimelyAmendment) clientStatus = 'extension_in_process';
 

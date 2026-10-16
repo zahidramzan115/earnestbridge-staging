@@ -80,8 +80,9 @@ export interface ClientOptionCycleItem {
   option_exercise_deadline: string;
   // Canonical cutoff display string: "Sep 24, 2026 at 5:00 PM ET"
   option_deadline_cutoff_display: string;
-  // Option status for client display (never expose 'missed' yet — Step 5D-2)
-  option_status: 'active' | 'exercised' | 'extended';
+  // Option status for client display. 'missed' = Option Exercise Deadline not met
+  // (operational closeout only; never implies legal termination or escrow outcome).
+  option_status: 'active' | 'exercised' | 'extended' | 'missed';
   // Whether a timely amendment has been received (affects client status display)
   // Do NOT expose whether amendment was late or internal leniency details
   has_timely_amendment: boolean;
@@ -244,21 +245,36 @@ export async function GET() {
       deal_display_name: d.company_name || d.property_address || null,
     }));
 
-  // Step 7: Query ACTIVE option cycles for authorized deals only
+  // Step 7: Query latest client-relevant option cycle per authorized deal
   // SECURITY: Borrower has NO direct SELECT on crm_deal_option_cycles.
   // This server-side query uses service role scoped to the authorized deal IDs.
-  // Only active cycles are returned (not historical extended/exercised/missed cycles).
+  // Client-relevant statuses: active / exercised / missed (never extended).
+  // Only the highest cycle_number per application is returned.
   // Only safe fields are included in the response — no internal admin metadata.
-  const { data: rawOptionCycles, error: optionError } = await supabase
+  const { data: rawOptionCyclesAll, error: optionError } = await supabase
     .from('crm_deal_option_cycles')
     .select(
       'id, application_id, cycle_number, deposit_goes_hard_date, option_exercise_deadline, status, option_exercised_at, actual_option_exercised_at, extension_psa_amendment_received_at, actual_amendment_received_at, extension_fee_paid_at'
     )
     .in('application_id', dealIds)
-    .eq('status', 'active');
+    .in('status', ['active', 'exercised', 'missed'])
+    .order('application_id', { ascending: true })
+    .order('cycle_number', { ascending: false });
 
   // Option cycles are optional — don't fail the whole response if this errors
   const optionCycles: ClientOptionCycleItem[] = [];
+
+  // Keep only the latest (highest cycle_number) client-relevant cycle per application
+  const latestByApplication = new Map<string, any>();
+  if (!optionError && rawOptionCyclesAll) {
+    for (const row of rawOptionCyclesAll as any[]) {
+      const existing = latestByApplication.get(row.application_id);
+      if (!existing || row.cycle_number > existing.cycle_number) {
+        latestByApplication.set(row.application_id, row);
+      }
+    }
+  }
+  const rawOptionCycles = Array.from(latestByApplication.values());
 
   if (!optionError && rawOptionCycles) {
     for (const row of rawOptionCycles) {
@@ -274,10 +290,10 @@ export async function GET() {
       }
 
       // Determine client-facing option status
-      // Do NOT expose 'missed' to client yet (Step 5D-2)
       // Do NOT expose internal leniency language
-      let clientStatus: 'active' | 'exercised' | 'extended' = 'active';
-      if (row.status === 'exercised') clientStatus = 'exercised';
+      let clientStatus: 'active' | 'exercised' | 'extended' | 'missed' = 'active';
+      if (row.status === 'missed') clientStatus = 'missed';
+      else if (row.status === 'exercised') clientStatus = 'exercised';
       else if (row.status === 'extended') clientStatus = 'extended';
 
       // Only include option_exercised_at if exercised (confirms completed action)
