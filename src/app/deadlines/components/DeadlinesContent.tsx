@@ -388,7 +388,13 @@ export default function DeadlinesContent() {
         const data = await res.json();
         setDeadlines(data.deadlines || []);
         setClosingDates(data.closingDates || []);
-        setOptionCycles(data.optionCycles || []);
+        const fetchedCycles: ClientOptionCycleItem[] = data.optionCycles || [];
+        setOptionCycles(fetchedCycles);
+        // Expand Completed by default only when a missed cycle exists so the
+        // "Deadline Not Met" card is immediately visible on initial load.
+        if (fetchedCycles.some((c) => c?.option_status === 'missed')) {
+          setShowCompleted(true);
+        }
       } catch {
         setError('Failed to load deadlines');
       } finally {
@@ -523,6 +529,7 @@ export default function DeadlinesContent() {
   );
 
   const totalActionRequired = activeOptionItems.length + actionRequired.length;
+  const hasMissedCycle = optionCycles.some((c) => c?.option_status === 'missed');
   const hasAnyContent = activeOptionItems.length > 0 || actionRequired.length > 0 || upcomingDealDates.length > 0 || completedItems.length > 0;
 
   if (loading) {
@@ -604,7 +611,7 @@ export default function DeadlinesContent() {
       )}
 
       {/* ── No open items ─────────────────────────────────────────────────── */}
-      {totalActionRequired === 0 && upcomingDealDates.length === 0 && completedItems.length > 0 && (
+      {totalActionRequired === 0 && upcomingDealDates.length === 0 && completedItems.length > 0 && !hasMissedCycle && (
         <div className="flex flex-col items-center justify-center py-10 text-center">
           <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center mb-3">
             <Icon name="CheckCircleIcon" size={26} className="text-emerald-500" />
