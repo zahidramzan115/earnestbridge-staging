@@ -3548,7 +3548,7 @@ const BorrowerDetailContent: React.FC = () => {
                   { label: 'Property Type', value: application.property_type || '—' },
                   { label: 'Purchase Price', value: formatCurrency(application.purchase_price) },
                   { label: 'EMD Amount', value: formatCurrency(application.deposit_amount) },
-                  { label: 'Closing Date', value: formatDate(application.closing_date) },
+                  { label: 'Target Closing Date', value: formatDate(application.closing_date) },
                   { label: 'Days to Funding', value: application.days_to_funding ? `${application.days_to_funding} days` : '—' },
                   { label: 'Submitted', value: formatDate(application.submitted_at) },
                   { label: 'Application ID', value: application.id.slice(0, 8).toUpperCase() },

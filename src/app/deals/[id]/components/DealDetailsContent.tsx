@@ -758,7 +758,7 @@ export default function DealDetailsContent() {
           <div>
             <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Target Closing</p>
             <p className="text-sm font-700 tabular-nums text-gray-900">
-              {formatDate(deal.closing_date)}
+              {formatDateSafe(deal.closing_date)}
             </p>
           </div>
           <div>
