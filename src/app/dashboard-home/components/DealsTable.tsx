@@ -16,11 +16,11 @@ interface DealRow {
   purchasePrice: number;
   status: ApplicationStatus;
   submittedDate: string;
-  closingDate: string;
+  dueDiligenceDays: number;
   createdAt: string;
 }
 
-type SortKey = 'dealName' | 'emdAmount' | 'purchasePrice' | 'closingDate' | 'submittedDate' | 'status';
+type SortKey = 'dealName' | 'emdAmount' | 'purchasePrice' | 'dueDiligenceDays' | 'submittedDate' | 'status';
 type SortDir = 'asc' | 'desc';
 
 const STATUS_FILTERS: { label: string; value: ApplicationStatus | 'all' }[] = [
@@ -73,7 +73,8 @@ function mapRow(row: any): DealRow {
     purchasePrice: row.purchase_price || 0,
     status: statusMap[row.app_status] ?? (row.app_status as ApplicationStatus) ?? 'draft',
     submittedDate: row.submitted_at || row.created_at,
-    closingDate: row.closing_date || '',
+    // -1 = not set (sorts before real values; rendered as "—")
+    dueDiligenceDays: typeof row.due_diligence_days === 'number' ? row.due_diligence_days : -1,
     createdAt: row.created_at,
   };
 }
@@ -260,7 +261,7 @@ export default function DealsTable() {
                 { label: 'Purchase Price', key: 'purchasePrice' as SortKey },
                 { label: 'Status', key: 'status' as SortKey },
                 { label: 'Submitted', key: 'submittedDate' as SortKey },
-                { label: 'Target Closing', key: 'closingDate' as SortKey },
+                { label: 'Due Diligence Period', key: 'dueDiligenceDays' as SortKey },
                 { label: 'Actions', key: null },
               ].map((col, i) => (
                 <th
@@ -359,10 +360,10 @@ export default function DealsTable() {
                       )}
                     </td>
                     <td className="px-4 py-3.5">
-                      {deal.closingDate ? (
+                      {deal.dueDiligenceDays >= 0 ? (
                         <div>
                           <span className="text-xs text-gray-600 tabular-nums whitespace-nowrap">
-                            {formatDateStable(deal.closingDate)}
+                            {deal.dueDiligenceDays} {deal.dueDiligenceDays === 1 ? 'Day' : 'Days'}
                           </span>
                         </div>
                       ) : (

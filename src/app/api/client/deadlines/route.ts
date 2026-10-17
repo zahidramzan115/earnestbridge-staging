@@ -47,17 +47,6 @@ export interface ClientDeadlineItem {
   deal_display_name: string | null;
 }
 
-export interface ClosingDateItem {
-  type: 'closing';
-  application_id: string;
-  title: string;
-  due_date: string;
-  responsible_party: 'system';
-  status: 'open' | 'completed';
-  property_address: string | null;
-  deal_display_name: string | null;
-}
-
 // ── Safe Option Cycle fields for client ──────────────────────────────────────
 // SECURITY: Borrower has NO direct SELECT on crm_deal_option_cycles.
 // These fields are safe to expose. Internal fields are excluded.
@@ -95,7 +84,7 @@ export interface ClientOptionCycleItem {
   deal_display_name: string | null;
 }
 
-export type NormalizedDeadline = ClientDeadlineItem | ClosingDateItem;
+export type NormalizedDeadline = ClientDeadlineItem;
 
 // ── Format option deadline cutoff for client display ─────────────────────────
 
@@ -179,13 +168,13 @@ export async function GET() {
   );
 
   if (dealIds.length === 0) {
-    return NextResponse.json({ deadlines: [], closingDates: [], optionCycles: [] });
+    return NextResponse.json({ deadlines: [], optionCycles: [] });
   }
 
   // Step 3c: Fetch deal display context, scoped to authorized IDs only
   const { data: deals, error: dealsError } = await supabase
     .from('borrower_applications')
-    .select('id, property_address, company_name, closing_date, app_status')
+    .select('id, property_address, company_name, app_status')
     .in('id', dealIds);
 
   if (dealsError) {
@@ -193,7 +182,7 @@ export async function GET() {
   }
 
   if (!deals || deals.length === 0) {
-    return NextResponse.json({ deadlines: [], closingDates: [], optionCycles: [] });
+    return NextResponse.json({ deadlines: [], optionCycles: [] });
   }
 
   // Build deal lookup for display context
@@ -230,20 +219,6 @@ export async function GET() {
     property_address: dealMap[row.application_id]?.property_address ?? null,
     deal_display_name: dealMap[row.application_id]?.display_name ?? null,
   }));
-
-  // Step 6: Normalize closing dates — only for this user's deals
-  const closingDates: ClosingDateItem[] = deals
-    .filter((d: any) => d.closing_date)
-    .map((d: any) => ({
-      type: 'closing' as const,
-      application_id: d.id,
-      title: 'Target Closing',
-      due_date: d.closing_date,
-      responsible_party: 'system' as const,
-      status: (['closed', 'funded'].includes(d.app_status) ? 'completed' : 'open') as 'open' | 'completed',
-      property_address: d.property_address || null,
-      deal_display_name: d.company_name || d.property_address || null,
-    }));
 
   // Step 7: Query latest client-relevant option cycle per authorized deal
   // SECURITY: Borrower has NO direct SELECT on crm_deal_option_cycles.
@@ -327,5 +302,5 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ deadlines, closingDates, optionCycles });
+  return NextResponse.json({ deadlines, optionCycles });
 }

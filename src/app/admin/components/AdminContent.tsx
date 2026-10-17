@@ -20,7 +20,8 @@ interface BorrowerApplication {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
-  closing_date: string | null;
+  closing_date?: string | null;
+  due_diligence_days?: number | null;
   app_status: AppStatus;
   submitted_at: string | null;
   created_at: string;
@@ -259,7 +260,7 @@ export default function AdminContent() {
     try {
       const { data, error: fetchError } = await supabase.
       from('borrower_applications').
-      select('id, user_id, first_name, last_name, email, phone, company_name, property_address, property_type, purchase_price, deposit_amount, closing_date, app_status, submitted_at, created_at, identity_verified').
+      select('id, user_id, first_name, last_name, email, phone, company_name, property_address, property_type, purchase_price, deposit_amount, due_diligence_days, app_status, submitted_at, created_at, identity_verified').
       order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
@@ -890,7 +891,7 @@ export default function AdminContent() {
                       <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wide hidden md:table-cell">Property</th>
                       <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wide hidden lg:table-cell">Deposit</th>
                       <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wide hidden lg:table-cell">Purchase Price</th>
-                      <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wide hidden xl:table-cell">Closing</th>
+                      <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wide hidden xl:table-cell">Due Diligence Period</th>
                       <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wide">Status</th>
                       <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wide hidden sm:table-cell">Submitted</th>
                       <th className="px-4 py-3 text-right text-xs font-600 text-gray-500 uppercase tracking-wide">Actions</th>
@@ -941,7 +942,7 @@ export default function AdminContent() {
                             {formatCurrency(app.purchase_price)}
                           </td>
                           <td className="px-4 py-3 hidden xl:table-cell text-gray-500 text-xs">
-                            {formatDate(app.closing_date)}
+                            {app.due_diligence_days != null ? `${app.due_diligence_days} ${app.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'}
                           </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center text-xs font-600 font-display px-2 py-1 rounded-full ${cfg.bg} ${cfg.color}`}>

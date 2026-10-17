@@ -16,7 +16,7 @@ const NO_STORE_HEADERS = {
 // Explicit allow-list of borrower_applications columns returned to the browser.
 // user_id and any internal/admin fields are intentionally excluded.
 const DEAL_SELECT =
-  'id, user_id, company_name, property_address, property_type, purchase_price, deposit_amount, emd_funded_cents, closing_date, app_status, llc_name, llc_state, transaction_description, w9_signed, mou_signed, option_agreement_signed, llc_formed, psa_signed';
+  'id, user_id, company_name, property_address, property_type, purchase_price, deposit_amount, emd_funded_cents, due_diligence_days, app_status, llc_name, llc_state, transaction_description, w9_signed, mou_signed, option_agreement_signed, llc_formed, psa_signed';
 
 function notFound() {
   return NextResponse.json(
@@ -270,7 +270,7 @@ export async function GET(
           purchase_price: application.purchase_price,
           deposit_amount: application.deposit_amount,
           emd_funded_cents: application.emd_funded_cents ?? null,
-          closing_date: application.closing_date,
+          due_diligence_days: application.due_diligence_days ?? null,
           app_status: application.app_status,
           llc_name: application.llc_name,
           llc_state: application.llc_state,

@@ -20,7 +20,7 @@ interface BorrowerApplication {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
-  closing_date: string | null;
+  due_diligence_days?: number | null;
   app_status: AppStatus;
   submitted_at: string | null;
   created_at: string;
@@ -383,7 +383,7 @@ export default function AdminDealsContent() {
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Borrower</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Property</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Value</th>
-                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Closing</th>
+                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Due Diligence Period</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Stage / Status</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Funding Conditions</th>
                   <th className="px-4 py-3" />
@@ -392,9 +392,6 @@ export default function AdminDealsContent() {
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(deal => {
                   const cfg = STATUS_CONFIG[deal.app_status] ?? STATUS_CONFIG.application;
-                  const daysLeft = getDaysUntil(deal.closing_date);
-                  const isOverdue = daysLeft !== null && daysLeft < 0;
-                  const isUrgent = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
                   const isActiveDeal = DEAL_STATUSES.includes(deal.app_status);
                   const currentStep = getWorkflowStep(deal);
                   const conditions = FUNDING_CONDITIONS.map(c => ({ ...c, met: !!(deal as Record<string, unknown>)[c.key] }));
@@ -425,14 +422,9 @@ export default function AdminDealsContent() {
                           <p className="text-xs text-gray-400 tabular-nums">EMD: {formatCurrency(deal.deposit_amount)}</p>
                         </td>
                         <td className="px-4 py-3.5">
-                          <p className={`text-sm font-600 whitespace-nowrap ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-gray-700'}`}>
-                            {formatDate(deal.closing_date)}
+                          <p className="text-sm font-600 whitespace-nowrap text-gray-700">
+                            {deal.due_diligence_days != null ? `${deal.due_diligence_days} ${deal.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'}
                           </p>
-                          {daysLeft !== null && deal.app_status !== 'closed' && (
-                            <p className={`text-xs ${isOverdue ? 'text-red-500' : isUrgent ? 'text-amber-500' : 'text-gray-400'}`}>
-                              {isOverdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`}
-                            </p>
-                          )}
                         </td>
                         <td className="px-4 py-3.5">
                           <WorkflowStageSelector

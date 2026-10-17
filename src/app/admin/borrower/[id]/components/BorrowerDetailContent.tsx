@@ -31,7 +31,8 @@ interface BorrowerApplication {
   purchase_price: number | null;
   deposit_amount: number | null;
   emd_funded_cents?: number | null;
-  closing_date: string | null;
+  closing_date?: string | null;
+  due_diligence_days?: number | null;
   app_status: AppStatus;
   submitted_at: string | null;
   created_at: string;
@@ -130,6 +131,12 @@ function getPhaseIndexForStatus(status: AppStatus | string): number {
 function formatCurrency(val: number | null) {
   if (val == null) return '—';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+}
+
+// Due Diligence Period is a number of calendar days (not a date).
+function formatDueDiligenceDays(days: number | null | undefined): string {
+  if (days == null || !Number.isFinite(days)) return '—';
+  return `${days} ${days === 1 ? 'Day' : 'Days'}`;
 }
 
 // Dynamic EMD: FUNDED (cents → dollars) only when emd_funded_cents > 0, else REQUESTED (dollars).
@@ -3023,7 +3030,6 @@ const BorrowerDetailContent: React.FC = () => {
   const currentPhaseIdx = getPhaseIndexForStatus(application.app_status);
 
   // ── Attention items ────────────────────────────────────────────────────
-  // NOTE: Target Closing (closing_date) is informational only and does not generate attention items.
   const attentionItems: string[] = [];
   if (!application.eb_assigned_owner) attentionItems.push('No assigned owner');
   const overdueTaskCount = openTasks.filter(t => {
@@ -3176,10 +3182,10 @@ const BorrowerDetailContent: React.FC = () => {
               </div>
             )}
 
-            {/* Target Closing (informational only) */}
+            {/* Due Diligence Period */}
             <div className="border rounded-xl p-3 bg-gray-50 border-gray-200">
-              <p className="text-[10px] font-700 uppercase tracking-wide mb-0.5 text-gray-500">Target Closing</p>
-              <p className="text-sm font-display font-700 text-gray-800">{formatDate(application.closing_date)}</p>
+              <p className="text-[10px] font-700 uppercase tracking-wide mb-0.5 text-gray-500">Due Diligence Period</p>
+              <p className="text-sm font-display font-700 text-gray-800">{formatDueDiligenceDays(application.due_diligence_days)}</p>
             </div>
 
             {/* Stage — inline editable */}
@@ -3558,7 +3564,7 @@ const BorrowerDetailContent: React.FC = () => {
                   { label: 'Property Type', value: application.property_type || '—' },
                   { label: 'Purchase Price', value: formatCurrency(application.purchase_price) },
                   { label: getDynamicEmd(application).label, value: getDynamicEmd(application).value },
-                  { label: 'Target Closing Date', value: formatDate(application.closing_date) },
+                  { label: 'Due Diligence Period', value: formatDueDiligenceDays(application.due_diligence_days) },
                   { label: 'Days to Funding', value: application.days_to_funding ? `${application.days_to_funding} days` : '—' },
                   { label: 'Submitted', value: formatDate(application.submitted_at) },
                   { label: 'Application ID', value: application.id.slice(0, 8).toUpperCase() },
@@ -3909,7 +3915,6 @@ const BorrowerDetailContent: React.FC = () => {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <DealDeadlinesSection
             applicationId={applicationId}
-            closingDate={application.closing_date}
             isMockId={isMockId}
           />
         </div>

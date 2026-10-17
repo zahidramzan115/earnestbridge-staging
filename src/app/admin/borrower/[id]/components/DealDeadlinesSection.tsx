@@ -23,7 +23,6 @@ export interface DealDeadline {
 
 interface DealDeadlinesSectionProps {
   applicationId: string;
-  closingDate: string | null;
   isMockId?: boolean;
 }
 
@@ -180,7 +179,6 @@ interface ConfirmAction {
 
 const DealDeadlinesSection: React.FC<DealDeadlinesSectionProps> = ({
   applicationId,
-  closingDate,
   isMockId = false,
 }) => {
   const [deadlines, setDeadlines] = useState<DealDeadline[]>([]);
@@ -223,8 +221,6 @@ const DealDeadlinesSection: React.FC<DealDeadlinesSectionProps> = ({
   useEffect(() => {
     loadDeadlines();
   }, [loadDeadlines]);
-
-  // NOTE: Target Closing (closing_date) is informational only — no countdown or urgency state.
 
   // ── Form handlers ───────────────────────────────────────────────────────────
 
@@ -396,26 +392,6 @@ const DealDeadlinesSection: React.FC<DealDeadlinesSectionProps> = ({
           <Icon name="PlusIcon" size={13} />
           Add Deadline
         </button>
-      </div>
-
-      {/* ── Target Closing (informational) ────────────────────────────────── */}
-      <div className="rounded-xl border p-4 bg-gray-50 border-gray-200">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-200">
-              <Icon name="HomeModernIcon" size={15} className="text-gray-500" />
-            </div>
-            <div>
-              <p className="text-xs font-display font-700 text-gray-900">Target Closing</p>
-              <p className="text-sm font-display font-700 mt-0.5 text-gray-700">
-                {closingDate ? formatDate(closingDate) : 'Not set'}
-              </p>
-            </div>
-          </div>
-          <span className="text-[10px] font-600 text-gray-400 bg-white border border-gray-200 px-2 py-1 rounded-lg flex-shrink-0">
-            Informational
-          </span>
-        </div>
       </div>
 
       {/* ── Deadline list ─────────────────────────────────────────────────── */}

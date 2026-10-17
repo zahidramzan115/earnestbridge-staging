@@ -18,7 +18,7 @@ interface Deal {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
-  closing_date: string | null;
+  due_diligence_days?: number | null;
   app_status: string;
   submitted_at: string | null;
   created_at: string;
@@ -287,7 +287,7 @@ export default function CRMDealsContent() {
       .select(`
         id, user_id, first_name, last_name, email, phone, company_name,
         property_address, property_type, purchase_price, deposit_amount,
-        closing_date, app_status, submitted_at, created_at,
+        due_diligence_days, app_status, submitted_at, created_at,
         eb_assigned_owner, primary_contact_id, crm_company_id, deal_workflow_stage,
         crm_contacts:primary_contact_id(id, first_name, last_name, lead_status, portal_link_status),
         crm_companies:crm_company_id(id, company_name),
@@ -325,12 +325,6 @@ export default function CRMDealsContent() {
   const stats = useMemo(() => ({
     total: deals.length,
     active: deals.filter(d => ['approved', 'in_progress', 'funded'].includes(d.app_status)).length,
-    closingThisMonth: deals.filter(d => {
-      if (!d.closing_date) return false;
-      const now = new Date();
-      const cd = new Date(d.closing_date);
-      return cd.getMonth() === now.getMonth() && cd.getFullYear() === now.getFullYear();
-    }).length,
     noCrmContact: deals.filter(d => !d.primary_contact_id && (!d.crm_deal_contacts || d.crm_deal_contacts.length === 0)).length,
   }), [deals]);
 
@@ -349,11 +343,10 @@ export default function CRMDealsContent() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {[
           { label: 'Total Deals', value: stats.total, color: 'text-gray-700', bg: 'bg-white' },
           { label: 'Active Deals', value: stats.active, color: 'text-blue-700', bg: 'bg-blue-50' },
-          { label: 'Closing This Month', value: stats.closingThisMonth, color: 'text-amber-700', bg: 'bg-amber-50' },
           { label: 'No CRM Contact', value: stats.noCrmContact, color: 'text-red-700', bg: 'bg-red-50' },
         ].map(s => (
           <div key={s.label} className={`${s.bg} rounded-xl border border-gray-200 p-4`}>
@@ -406,7 +399,6 @@ export default function CRMDealsContent() {
         <div className="space-y-3">
           {filtered.map(deal => {
             const cfg = STATUS_CONFIG[deal.app_status] || STATUS_CONFIG.application;
-            const daysUntil = getDaysUntil(deal.closing_date);
             const allContacts = deal.crm_deal_contacts || [];
             const primaryContact = deal.crm_contacts;
 
@@ -426,7 +418,7 @@ export default function CRMDealsContent() {
                       {deal.first_name} {deal.last_name} · {deal.property_type || '—'} · {formatCurrency(deal.deposit_amount)} EMD
                     </p>
                     <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-400">
-                      <span>Closing: {formatDate(deal.closing_date)}{daysUntil !== null && <span className={`ml-1 font-600 ${daysUntil < 0 ? 'text-red-500' : daysUntil <= 14 ? 'text-amber-600' : 'text-gray-500'}`}>({daysUntil < 0 ? `${Math.abs(daysUntil)}d overdue` : `${daysUntil}d`})</span>}</span>
+                      <span>Due Diligence Period: {deal.due_diligence_days != null ? `${deal.due_diligence_days} ${deal.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'}</span>
                       {deal.eb_assigned_owner && <span>Owner: {deal.eb_assigned_owner}</span>}
                       {(deal.crm_companies as any)?.company_name && (
                         <Link href={`/admin/crm/companies/${(deal.crm_companies as any).id}`} className="text-eb-green-600 hover:underline">

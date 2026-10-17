@@ -77,7 +77,7 @@ interface RealApplication {
   status: ApplicationStatus;
   dbStatus: string;
   submittedDate: string;
-  closingDate: string;
+  dueDiligenceDays: number | null;
 }
 
 function mapRow(row: any): RealApplication {
@@ -91,7 +91,7 @@ function mapRow(row: any): RealApplication {
     status: mapDbStatus(row.app_status),
     dbStatus: row.app_status,
     submittedDate: row.submitted_at || row.created_at,
-    closingDate: row.closing_date || '',
+    dueDiligenceDays: typeof row.due_diligence_days === 'number' ? row.due_diligence_days : null,
   };
 }
 
@@ -355,10 +355,10 @@ export default function ApplicationStatusContent() {
           <div>
             <p className="font-display font-700 text-gray-900 text-sm">{statusLabel(application.dbStatus)}</p>
             <p className="text-sm text-gray-600 mt-0.5">{statusDescription(application.dbStatus)}</p>
-            {application.closingDate && (
+            {application.dueDiligenceDays != null && (
               <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
                 <Icon name="CalendarIcon" size={12} />
-                Target closing: {formatDate(application.closingDate)}
+                Due Diligence Period: {application.dueDiligenceDays} {application.dueDiligenceDays === 1 ? 'Day' : 'Days'}
               </p>
             )}
           </div>

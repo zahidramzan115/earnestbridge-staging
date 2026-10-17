@@ -57,7 +57,7 @@ export async function GET(
         id, role,
         borrower_applications(
           id, first_name, last_name, email, property_address, property_type,
-          purchase_price, deposit_amount, closing_date, app_status, created_at, submitted_at
+          purchase_price, deposit_amount, due_diligence_days, app_status, created_at, submitted_at
         )
       )
     `)

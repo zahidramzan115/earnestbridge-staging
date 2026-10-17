@@ -53,7 +53,7 @@ interface Contact {
       property_type: string | null;
       purchase_price: number | null;
       deposit_amount: number | null;
-      closing_date: string | null;
+      due_diligence_days?: number | null;
       app_status: string;
       created_at: string;
       submitted_at: string | null;
@@ -373,7 +373,7 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
           id, role,
           borrower_applications(
             id, user_id, first_name, last_name, property_address, property_type,
-            purchase_price, deposit_amount, closing_date, app_status, created_at, submitted_at
+            purchase_price, deposit_amount, due_diligence_days, app_status, created_at, submitted_at
           )
         )
       `)
@@ -1093,7 +1093,7 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
                             {deal.property_type || 'Property'} · {deal.purchase_price ? formatCurrency(deal.purchase_price) : '—'}
                           </p>
                           <p className="text-xs text-gray-400 mt-1">
-                            Closing: {formatDate(deal.closing_date)} · Role: {dc.role}
+                            Due Diligence Period: {deal.due_diligence_days != null ? `${deal.due_diligence_days} ${deal.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'} · Role: {dc.role}
                           </p>
                         </div>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-600 ${DEAL_STATUS_COLORS[deal.app_status] || 'bg-gray-100 text-gray-600'}`}>

@@ -16,17 +16,6 @@ interface ClientDeadlineItem {
   deal_display_name: string | null;
 }
 
-interface ClosingDateItem {
-  type: 'closing';
-  application_id: string;
-  title: string;
-  due_date: string;
-  responsible_party: 'system';
-  status: 'open' | 'completed';
-  property_address: string | null;
-  deal_display_name: string | null;
-}
-
 interface ClientOptionCycleItem {
   type: 'option_cycle';
   id: string;
@@ -79,7 +68,6 @@ function daysUntil(dateStr: string): number {
 export default function DashboardDeadlineSummary() {
   const { user } = useAuth();
   const [deadlines, setDeadlines] = useState<ClientDeadlineItem[]>([]);
-  const [closingDates, setClosingDates] = useState<ClosingDateItem[]>([]);
   const [optionCycles, setOptionCycles] = useState<ClientOptionCycleItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -92,7 +80,6 @@ export default function DashboardDeadlineSummary() {
         if (!res.ok) { setLoading(false); return; }
         const data = await res.json();
         setDeadlines(data.deadlines || []);
-        setClosingDates(data.closingDates || []);
         setOptionCycles(data.optionCycles || []);
       } catch {
         // silent fail — dashboard should not break if deadlines fail
@@ -157,34 +144,9 @@ export default function DashboardDeadlineSummary() {
       }))
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
-    // ── 3. Informational closing dates ────────────────────────────────────
-    const closingItems: DisplayItem[] = closingDates
-      .filter((c) => c.status === 'open')
-      .map((c) => ({
-        key: `closing-${c.application_id}`,
-        title: 'Target Closing',
-        due_date: c.due_date,
-        responsible_party: 'system',
-        deal_display_name: c.deal_display_name,
-        daysLeft: daysUntil(c.due_date),
-        isClosing: true,
-        isOptionCycle: false,
-        isActionRequired: false,
-      }))
-      .sort((a, b) => a.daysLeft - b.daysLeft);
-
     // ── Priority assembly ─────────────────────────────────────────────────
-    // All action items are shown first (no cap on action items).
-    // Informational items fill remaining slots up to a total of 5 visible items.
-    // This ensures informational dates never displace genuine Action Required items.
-
-    const actionItems = [...activeOptionItems, ...clientActionItems];
-    const MAX_TOTAL = 5;
-    const remainingSlots = Math.max(0, MAX_TOTAL - actionItems.length);
-    const informationalItems = closingItems.slice(0, remainingSlots);
-
-    return [...actionItems, ...informationalItems];
-  }, [deadlines, closingDates, optionCycles]);
+    return [...activeOptionItems, ...clientActionItems];
+  }, [deadlines, optionCycles]);
 
   const actionRequiredCount = useMemo(
     () => displayItems.filter((i) => i.isActionRequired).length,
@@ -222,10 +184,9 @@ export default function DashboardDeadlineSummary() {
       {/* Items */}
       <div className="space-y-2.5">
         {displayItems.map((item) => {
-          // Target Closing is informational only — never overdue/urgent styling or countdown
-          const isOverdue = !item.isClosing && item.daysLeft < 0;
-          const isToday = !item.isClosing && item.daysLeft === 0;
-          const isUrgent = !item.isClosing && item.daysLeft > 0 && item.daysLeft <= 7;
+          const isOverdue = item.daysLeft < 0;
+          const isToday = item.daysLeft === 0;
+          const isUrgent = item.daysLeft > 0 && item.daysLeft <= 7;
 
           // Option cycle items get special indigo styling
           const numBg = item.isOptionCycle

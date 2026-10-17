@@ -37,7 +37,7 @@ interface Deal {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
-  closing_date: string | null;
+  due_diligence_days?: number | null;
   app_status: string;
   created_at: string;
 }
@@ -95,7 +95,7 @@ export default function CompanyDetailContent({ companyId }: { companyId: string 
         .eq('company_id', companyId).eq('is_merged', false).order('created_at', { ascending: false }),
       // Deals: either directly linked to company OR via a contact that belongs to this company
       supabase.from('borrower_applications')
-        .select('id, first_name, last_name, property_address, property_type, purchase_price, deposit_amount, closing_date, app_status, created_at')
+        .select('id, first_name, last_name, property_address, property_type, purchase_price, deposit_amount, due_diligence_days, app_status, created_at')
         .eq('crm_company_id', companyId)
         .order('created_at', { ascending: false }),
     ]);
@@ -112,7 +112,7 @@ export default function CompanyDetailContent({ companyId }: { companyId: string 
       const contactIds = cts.map((c: Contact) => c.id);
       const { data: contactDeals } = await supabase
         .from('crm_deal_contacts')
-        .select('deal_id, borrower_applications(id, first_name, last_name, property_address, property_type, purchase_price, deposit_amount, closing_date, app_status, created_at)')
+        .select('deal_id, borrower_applications(id, first_name, last_name, property_address, property_type, purchase_price, deposit_amount, due_diligence_days, app_status, created_at)')
         .in('contact_id', contactIds);
 
       const contactDealList: Deal[] = [];
@@ -286,7 +286,7 @@ export default function CompanyDetailContent({ companyId }: { companyId: string 
                       <p className="text-xs text-gray-400">
                         {d.first_name} {d.last_name} · {d.property_type || '—'} · {formatCurrency(d.deposit_amount)} EMD
                       </p>
-                      <p className="text-xs text-gray-400">Closing: {formatDate(d.closing_date)}</p>
+                      <p className="text-xs text-gray-400">Due Diligence Period: {d.due_diligence_days != null ? `${d.due_diligence_days} ${d.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'}</p>
                     </div>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-600 ${DEAL_STATUS_COLORS[d.app_status] || 'bg-gray-100 text-gray-600'}`}>
                       {d.app_status?.replace(/_/g, ' ')}

@@ -15,7 +15,6 @@ interface AppRow {
   app_status: string;
   deposit_amount: number | null;
   purchase_price: number | null;
-  closing_date: string | null;
   submitted_at: string | null;
   days_to_funding: number | null;
 }
@@ -41,7 +40,7 @@ export default function KPIBentoGrid({ revisionActionCount = 0 }: KPIBentoGridPr
       const [appsRes, docsRes] = await Promise.all([
         supabase
           .from('borrower_applications')
-          .select('id, app_status, deposit_amount, purchase_price, closing_date, submitted_at, days_to_funding')
+          .select('id, app_status, deposit_amount, purchase_price, submitted_at, days_to_funding')
           .eq('user_id', user.id),
         supabase
           .from('borrower_documents')
@@ -66,26 +65,10 @@ export default function KPIBentoGrid({ revisionActionCount = 0 }: KPIBentoGridPr
   const funded = apps.filter((a) => a.app_status === 'funded' || a.app_status === 'closed');
   const totalFunded = funded.reduce((s, a) => s + (a.deposit_amount ?? 0), 0);
 
-  const today = new Date();
-  const sevenDays = new Date();
-  sevenDays.setDate(today.getDate() + 7);
-  const upcomingClosings = apps.filter((a) => {
-    if (!a.closing_date || ['closed', 'rejected'].includes(a.app_status)) return false;
-    const d = new Date(a.closing_date);
-    return d >= today && d <= sevenDays;
-  });
-
-  const fundedWithDays = funded.filter((a) => {
-    if (a.days_to_funding) return true;
-    return a.submitted_at && a.closing_date;
-  });
+  const fundedWithDays = funded.filter((a) => !!a.days_to_funding);
   const avgDays = fundedWithDays.length > 0
     ? Math.round(
-        fundedWithDays.reduce((s, a) => {
-          if (a.days_to_funding) return s + a.days_to_funding;
-          const diff = new Date(a.closing_date!).getTime() - new Date(a.submitted_at!).getTime();
-          return s + Math.round(diff / (1000 * 60 * 60 * 24));
-        }, 0) / fundedWithDays.length
+        fundedWithDays.reduce((s, a) => s + (a.days_to_funding ?? 0), 0) / fundedWithDays.length
       )
     : 0;
 
@@ -175,22 +158,6 @@ export default function KPIBentoGrid({ revisionActionCount = 0 }: KPIBentoGridPr
         </div>
       </div>
 
-      {/* Upcoming Closings — warning if any */}
-      <div className={`rounded-2xl p-4 sm:p-5 shadow-card border flex flex-col justify-between min-h-[110px] sm:min-h-[130px] ${upcomingClosings.length > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-100'}`}>
-        <div className="flex items-start justify-between">
-          <p className={`text-xs font-display font-600 uppercase tracking-widest ${upcomingClosings.length > 0 ? 'text-amber-600' : 'text-gray-500'}`}>Closings (7 Days)</p>
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${upcomingClosings.length > 0 ? 'bg-amber-100' : 'bg-gray-100'}`}>
-            <Icon name="CalendarDaysIcon" size={17} className={upcomingClosings.length > 0 ? 'text-amber-600' : 'text-gray-400'} />
-          </div>
-        </div>
-        <div>
-          <p className={`tabular-nums font-display text-2xl sm:text-3xl font-800 mt-2 ${upcomingClosings.length > 0 ? 'text-amber-700' : 'text-gray-900'}`}>{upcomingClosings.length}</p>
-          <p className={`text-xs font-medium mt-1 ${upcomingClosings.length > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
-            {upcomingClosings.length > 0 ? 'Closing dates approaching' : 'No closings this week'}
-          </p>
-        </div>
-      </div>
-
       {/* Avg Days to Funding */}
       <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-card border border-gray-100 flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
         <div className="flex items-start justify-between">
@@ -206,7 +173,7 @@ export default function KPIBentoGrid({ revisionActionCount = 0 }: KPIBentoGridPr
       </div>
 
       {/* Total Portfolio Value */}
-      <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-card border border-gray-100 flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
+      <div className="sm:col-span-2 bg-white rounded-2xl p-4 sm:p-5 shadow-card border border-gray-100 flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
         <div className="flex items-start justify-between">
           <p className="text-gray-500 text-xs font-display font-600 uppercase tracking-widest">Portfolio Value</p>
           <div className="w-9 h-9 rounded-lg bg-eb-gold-100 flex items-center justify-center">

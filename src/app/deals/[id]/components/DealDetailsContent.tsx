@@ -17,7 +17,7 @@ interface Deal {
   purchase_price: number | null;
   deposit_amount: number | null;
   emd_funded_cents?: number | null;
-  closing_date: string | null;
+  due_diligence_days?: number | null;
   app_status: string;
   submitted_at?: string | null;
   created_at?: string;
@@ -779,9 +779,9 @@ export default function DealDetailsContent() {
             <p className={`text-sm font-700 tabular-nums ${getDynamicEmd(deal).isFunded ? 'text-eb-green-900' : 'text-amber-800'}`}>{getDynamicEmd(deal).value}</p>
           </div>
           <div>
-            <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Target Closing</p>
+            <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Due Diligence Period</p>
             <p className="text-sm font-700 tabular-nums text-gray-900">
-              {formatDateSafe(deal.closing_date)}
+              {deal.due_diligence_days != null ? `${deal.due_diligence_days} ${deal.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'}
             </p>
           </div>
           <div>

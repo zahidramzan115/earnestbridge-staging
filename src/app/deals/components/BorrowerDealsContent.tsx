@@ -15,7 +15,7 @@ interface Deal {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
-  closing_date: string | null;
+  due_diligence_days?: number | null;
   app_status: string;
   submitted_at: string | null;
   created_at: string;
@@ -379,9 +379,9 @@ export default function BorrowerDealsContent() {
                           <p className="font-display font-700 text-gray-900">{formatCurrency(deal.deposit_amount)}</p>
                         </div>
                         <div>
-                          <span className="text-xs text-gray-400">Target Closing</span>
+                          <span className="text-xs text-gray-400">Due Diligence Period</span>
                           <p className="font-display font-700 text-gray-900">
-                            {formatDate(deal.closing_date)}
+                            {deal.due_diligence_days != null ? `${deal.due_diligence_days} ${deal.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'}
                           </p>
                         </div>
                       </div>

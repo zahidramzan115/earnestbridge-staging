@@ -19,7 +19,8 @@ interface BorrowerApplication {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
-  closing_date: string | null;
+  closing_date?: string | null;
+  due_diligence_days?: number | null;
   app_status: AppStatus;
   submitted_at: string | null;
   created_at: string;
@@ -106,7 +107,7 @@ function ApplicationRow({ app, type, onClick }: ApplicationRowProps) {
           {app.property_type && <span>{app.property_type}</span>}
           {app.purchase_price && <span>Purchase: {formatCurrency(app.purchase_price)}</span>}
           {app.deposit_amount && <span>EMD: {formatCurrency(app.deposit_amount)}</span>}
-          {app.closing_date && <span>Closes: {formatDate(app.closing_date)}</span>}
+          {app.due_diligence_days != null && <span>Due Diligence: {app.due_diligence_days} {app.due_diligence_days === 1 ? 'Day' : 'Days'}</span>}
         </div>
         <p className="text-[11px] text-gray-300 mt-0.5">
           {app.submitted_at ? `Submitted ${formatDate(app.submitted_at)}` : `Created ${formatDate(app.created_at)}`}
@@ -153,7 +154,7 @@ const BorrowerProfileContent: React.FC = () => {
       const [appsResult, accessResult] = await Promise.all([
         supabase
           .from('borrower_applications')
-          .select('id, user_id, first_name, last_name, email, phone, company_name, property_address, property_type, purchase_price, deposit_amount, closing_date, app_status, submitted_at, created_at, identity_verified, days_to_funding')
+          .select('id, user_id, first_name, last_name, email, phone, company_name, property_address, property_type, purchase_price, deposit_amount, due_diligence_days, app_status, submitted_at, created_at, identity_verified, days_to_funding')
           .eq('user_id', userId)
           .order('created_at', { ascending: false }),
         supabase

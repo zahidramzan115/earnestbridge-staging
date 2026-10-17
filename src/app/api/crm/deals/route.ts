@@ -58,7 +58,7 @@ export async function GET(request: Request) {
     .select(`
       id, first_name, last_name, email, phone, company_name,
       property_address, property_type, purchase_price, deposit_amount,
-      closing_date, app_status, submitted_at, created_at,
+      due_diligence_days, app_status, submitted_at, created_at,
       eb_assigned_owner, primary_contact_id, crm_company_id,
       deal_workflow_stage,
       crm_contacts:primary_contact_id(id, first_name, last_name, lead_status, portal_link_status),

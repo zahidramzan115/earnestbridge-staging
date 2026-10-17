@@ -18,17 +18,6 @@ interface ClientDeadlineItem {
   deal_display_name: string | null;
 }
 
-interface ClosingDateItem {
-  type: 'closing';
-  application_id: string;
-  title: string;
-  due_date: string;
-  responsible_party: 'system';
-  status: 'open' | 'completed';
-  property_address: string | null;
-  deal_display_name: string | null;
-}
-
 interface ClientOptionCycleItem {
   type: 'option_cycle';
   id: string;
@@ -280,8 +269,8 @@ function OptionCycleCard({ item }: { item: DisplayDeadline }) {
 // ─── Deadline Card ────────────────────────────────────────────────────────────
 
 function DeadlineCard({ item }: { item: DisplayDeadline }) {
-  // Target Closing is informational only — neutral styling, no countdown/urgency.
-  const state = item.isClosing ? (item.derivedState === 'completed' ? 'completed' : 'informational') : item.derivedState;
+  // Deadline cards use standard urgency styling.
+  const state = item.derivedState;
 
   const stateConfig = {
     overdue: {
@@ -374,7 +363,6 @@ function SectionHeader({ icon, title, count, color }: { icon: string; title: str
 export default function DeadlinesContent() {
   const { user } = useAuth();
   const [deadlines, setDeadlines] = useState<ClientDeadlineItem[]>([]);
-  const [closingDates, setClosingDates] = useState<ClosingDateItem[]>([]);
   const [optionCycles, setOptionCycles] = useState<ClientOptionCycleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -394,7 +382,6 @@ export default function DeadlinesContent() {
         }
         const data = await res.json();
         setDeadlines(data.deadlines || []);
-        setClosingDates(data.closingDates || []);
         const fetchedCycles: ClientOptionCycleItem[] = data.optionCycles || [];
         setOptionCycles(fetchedCycles);
         // Expand Completed by default only when a missed cycle exists so the
@@ -465,26 +452,8 @@ export default function DeadlinesContent() {
       });
     });
 
-    closingDates.forEach((c) => {
-      const dl = daysUntil(c.due_date);
-      items.push({
-        key: `closing-${c.application_id}`,
-        application_id: c.application_id,
-        title: 'Target Closing',
-        due_date: c.due_date,
-        responsible_party: 'system',
-        status: c.status,
-        property_address: c.property_address,
-        deal_display_name: c.deal_display_name,
-        isClosing: true,
-        isOptionCycle: false,
-        daysLeft: dl,
-        derivedState: derivedState(c.status, dl),
-      });
-    });
-
     return items;
-  }, [deadlines, closingDates]);
+  }, [deadlines]);
 
   // ── Priority ordering per spec ────────────────────────────────────────────
   // 1. Active unresolved Option Exercise Deadlines (top of Action Required)

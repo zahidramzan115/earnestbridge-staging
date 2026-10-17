@@ -36,7 +36,6 @@ interface CRMDeal {
   last_name: string;
   company_name: string | null;
   deposit_amount: number | null;
-  closing_date: string | null;
   app_status: string;
   eb_assigned_owner: string | null;
   primary_contact_id: string | null;
@@ -55,7 +54,7 @@ interface CRMActivity {
 
 interface AttentionItem {
   id: string;
-  type: 'overdue_task' | 'task_due_today' | 'new_lead' | 'unassigned_lead' | 'closing_soon';
+  type: 'overdue_task' | 'task_due_today' | 'new_lead' | 'unassigned_lead';
   priority: number;
   label: string;
   subLabel: string;
@@ -75,7 +74,7 @@ interface SubmittedDeal {
   last_name: string;
   property_address: string | null;
   deposit_amount: number | null;
-  closing_date: string | null;
+  due_diligence_days: number | null;
   eb_assigned_owner: string | null;
   submitted_at: string | null;
   created_at: string;
@@ -299,11 +298,9 @@ export default function AdminOverviewContent() {
   const [unassignedCount, setUnassignedCount] = useState(0);
   const [dueTodayCount, setDueTodayCount] = useState(0);
   const [overdueCount, setOverdueCount] = useState(0);
-  const [closingSoonCount, setClosingSoonCount] = useState(0);
 
   const [newLeads, setNewLeads] = useState<CRMContact[]>([]);
   const [tasks, setTasks] = useState<CRMTask[]>([]);
-  const [closingDeals, setClosingDeals] = useState<CRMDeal[]>([]);
   const [activities, setActivities] = useState<CRMActivity[]>([]);
   const [attentionItems, setAttentionItems] = useState<AttentionItem[]>([]);
 
@@ -357,7 +354,6 @@ export default function AdminOverviewContent() {
   const load = useCallback(async () => {
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
-    const in14Days = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
 
     // Build owner filter helper
     const applyOwner = (q: any, ownerField: string) => {
@@ -370,12 +366,10 @@ export default function AdminOverviewContent() {
       unassignedCountRes,
       dueTodayCountRes,
       overdueCountRes,
-      closingSoonCountRes,
       newLeadsListRes,
       overdueTasksRes,
       dueTodayTasksRes,
       upcomingTasksRes,
-      closingDealsRes,
       activitiesRes,
       // NEW: submitted deals (always team-wide)
       submittedDealsCountRes,
@@ -400,14 +394,6 @@ export default function AdminOverviewContent() {
         supabase.from('crm_tasks').select('*', { count: 'exact', head: true })
           .eq('task_status', 'Open').lt('due_date', today),
         'assigned_to'
-      ),
-      applyOwner(
-        supabase.from('borrower_applications').select('*', { count: 'exact', head: true })
-          .in('app_status', ['application', 'under_review', 'approved', 'in_progress'])
-          .not('closing_date', 'is', null)
-          .gte('closing_date', today)
-          .lte('closing_date', in14Days),
-        'eb_assigned_owner'
       ),
 
       // New Leads list (5 most recent)
@@ -446,18 +432,6 @@ export default function AdminOverviewContent() {
         'assigned_to'
       ),
 
-      // Closing soon deals
-      applyOwner(
-        supabase.from('borrower_applications')
-          .select('id, first_name, last_name, company_name, deposit_amount, closing_date, app_status, eb_assigned_owner, primary_contact_id, crm_contacts(first_name, last_name)')
-          .in('app_status', ['application', 'under_review', 'approved', 'in_progress'])
-          .not('closing_date', 'is', null)
-          .gte('closing_date', today)
-          .lte('closing_date', in14Days)
-          .order('closing_date', { ascending: true }),
-        'eb_assigned_owner'
-      ),
-
       // Recent CRM activity (unchanged)
       supabase.from('crm_activities')
         .select('id, event_type, title, detail, actor, created_at, crm_contacts(id, first_name, last_name)')
@@ -470,7 +444,7 @@ export default function AdminOverviewContent() {
 
       // NEW: List of submitted deals (team-wide, newest first)
       supabase.from('borrower_applications')
-        .select('id, user_id, first_name, last_name, property_address, deposit_amount, closing_date, eb_assigned_owner, submitted_at, created_at, primary_contact_id, crm_contacts(id, first_name, last_name)')
+        .select('id, user_id, first_name, last_name, property_address, deposit_amount, due_diligence_days, eb_assigned_owner, submitted_at, created_at, primary_contact_id, crm_contacts(id, first_name, last_name)')
         .eq('app_status', 'submitted')
         .order('submitted_at', { ascending: false, nullsFirst: false })
         .limit(10),
@@ -488,17 +462,14 @@ export default function AdminOverviewContent() {
     setUnassignedCount(unassignedCountRes.count ?? 0);
     setDueTodayCount(dueTodayCountRes.count ?? 0);
     setOverdueCount(overdueCountRes.count ?? 0);
-    setClosingSoonCount(closingSoonCountRes.count ?? 0);
 
     const newLeadsList = (newLeadsListRes.data as CRMContact[]) || [];
     const overdueTasks = (overdueTasksRes.data as CRMTask[]) || [];
     const dueTodayTasks = (dueTodayTasksRes.data as CRMTask[]) || [];
     const upcomingTasks = (upcomingTasksRes.data as CRMTask[]) || [];
-    const closingDealsList = (closingDealsRes.data as CRMDeal[]) || [];
     const activitiesList = (activitiesRes.data as CRMActivity[]) || [];
 
     setNewLeads(newLeadsList);
-    setClosingDeals(closingDealsList);
     setActivities(activitiesList);
 
     // NEW: Submitted deals
@@ -678,28 +649,6 @@ export default function AdminOverviewContent() {
       });
     }
 
-    // 5. Deals closing soon
-    closingDealsList.slice(0, 2).forEach((d) => {
-      const daysUntil = getDaysUntil(d.closing_date);
-      const contact = d.crm_contacts as any;
-      const name = contact
-        ? `${contact.first_name} ${contact.last_name}`
-        : `${d.first_name} ${d.last_name}`;
-      attention.push({
-        id: `deal-closing-${d.id}`,
-        type: 'closing_soon',
-        priority: 5,
-        label: name,
-        subLabel: d.company_name || 'No company',
-        owner: d.eb_assigned_owner || 'Unassigned',
-        dateLabel: daysUntil === 0 ? 'Closing today' : daysUntil === 1 ? 'Closing tomorrow' : `Closing in ${daysUntil}d`,
-        href: `/admin/crm/deals`,
-        icon: 'CalendarDaysIcon',
-        iconColor: 'text-emerald-600',
-        iconBg: 'bg-emerald-50',
-      });
-    });
-
     setAttentionItems(attention.slice(0, 10));
     setLoading(false);
   }, [supabase, effectiveOwner, scope]);
@@ -799,7 +748,7 @@ export default function AdminOverviewContent() {
       </div>
 
       {/* ── Action Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <ActionCard
           label="New Leads"
           count={newLeadsCount}
@@ -840,16 +789,6 @@ export default function AdminOverviewContent() {
           highlight={overdueCount > 0}
           urgent={overdueCount > 0}
         />
-        <ActionCard
-          label="Closing Soon"
-          count={closingSoonCount}
-          icon="CalendarDaysIcon"
-          iconColor="text-emerald-600"
-          iconBg="bg-emerald-50"
-          borderColor="border-emerald-200"
-          href="/admin/crm/deals"
-          highlight={closingSoonCount > 0}
-        />
       </div>
 
       {/* ── NEW: New Deal Submissions (always team-wide) ── */}
@@ -881,7 +820,7 @@ export default function AdminOverviewContent() {
                     <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Client</th>
                     <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Submitted</th>
                     <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">EMD</th>
-                    <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Closing</th>
+                    <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Due Diligence Period</th>
                     <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Owner</th>
                     <th className="px-4 py-3" />
                   </tr>
@@ -924,7 +863,7 @@ export default function AdminOverviewContent() {
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">{formatRelativeTime(submittedTs)}</td>
                         <td className="px-4 py-3 text-gray-700 font-500">{formatCurrency(d.deposit_amount)}</td>
-                        <td className="px-4 py-3 text-gray-500 text-xs">{d.closing_date ? formatDate(d.closing_date) : '—'}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{d.due_diligence_days != null ? `${d.due_diligence_days} ${d.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'}</td>
                         <td className="px-4 py-3">
                           <div className="flex flex-col gap-1">
                             <div className="relative">
@@ -1054,7 +993,7 @@ export default function AdminOverviewContent() {
                       <div className="flex items-center gap-3 text-xs text-gray-400">
                         <span>{formatRelativeTime(submittedTs)}</span>
                         {d.deposit_amount && <span>EMD: {formatCurrency(d.deposit_amount)}</span>}
-                        {d.closing_date && <span>Closes {formatDate(d.closing_date)}</span>}
+                        {d.due_diligence_days != null && <span>Due Diligence: {d.due_diligence_days} {d.due_diligence_days === 1 ? 'Day' : 'Days'}</span>}
                       </div>
                       {dealLink && (
                         <Link
@@ -1186,8 +1125,7 @@ export default function AdminOverviewContent() {
                   </div>
                   <span className={`text-xs font-600 px-2 py-0.5 rounded-full ${
                     item.type === 'overdue_task' ? 'bg-red-100 text-red-700' :
-                    item.type === 'task_due_today' ? 'bg-amber-100 text-amber-700' :
-                    item.type === 'closing_soon'? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                    item.type === 'task_due_today' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
                   }`}>
                     {item.dateLabel}
                   </span>
@@ -1286,93 +1224,6 @@ export default function AdminOverviewContent() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* ── Upcoming Closings ── */}
-      <div>
-        <SectionHeader title="Upcoming Closings" viewAllHref="/admin/crm/deals" viewAllLabel="View All Deals" />
-        {closingDeals.length === 0 ? (
-          <EmptyState message="No deals closing in the next 14 days." />
-        ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            {/* Desktop table */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Client / Deal</th>
-                    <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Company</th>
-                    <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Owner</th>
-                    <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">EMD</th>
-                    <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Closing</th>
-                    <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wide">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {closingDeals.map((d) => {
-                    const contact = d.crm_contacts as any;
-                    const name = contact
-                      ? `${contact.first_name} ${contact.last_name}`
-                      : `${d.first_name} ${d.last_name}`;
-                    const daysUntil = getDaysUntil(d.closing_date);
-                    return (
-                      <tr key={d.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-3 font-600 text-gray-900">{name}</td>
-                        <td className="px-4 py-3 text-gray-500">{d.company_name || '—'}</td>
-                        <td className="px-4 py-3 text-gray-500">{d.eb_assigned_owner || 'Unassigned'}</td>
-                        <td className="px-4 py-3 text-gray-700 font-500">{formatCurrency(d.deposit_amount)}</td>
-                        <td className="px-4 py-3">
-                          <span className={`text-xs font-600 px-2 py-0.5 rounded-full ${
-                            daysUntil !== null && daysUntil <= 3 ? 'bg-red-100 text-red-700' :
-                            daysUntil !== null && daysUntil <= 7 ? 'bg-amber-100 text-amber-700': 'bg-emerald-100 text-emerald-700'
-                          }`}>
-                            {daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
-                          </span>
-                          <span className="ml-2 text-xs text-gray-400">{formatDate(d.closing_date)}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="text-xs text-gray-500">{DEAL_STATUS_LABELS[d.app_status] || d.app_status}</span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile cards */}
-            <div className="sm:hidden divide-y divide-gray-50">
-              {closingDeals.map((d) => {
-                const contact = d.crm_contacts as any;
-                const name = contact
-                  ? `${contact.first_name} ${contact.last_name}`
-                  : `${d.first_name} ${d.last_name}`;
-                const daysUntil = getDaysUntil(d.closing_date);
-                return (
-                  <div key={d.id} className="px-4 py-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-600 text-gray-900">{name}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{d.company_name || '—'} · {d.eb_assigned_owner || 'Unassigned'}</p>
-                      </div>
-                      <span className={`text-xs font-600 px-2 py-0.5 rounded-full flex-shrink-0 ${
-                        daysUntil !== null && daysUntil <= 3 ? 'bg-red-100 text-red-700' :
-                        daysUntil !== null && daysUntil <= 7 ? 'bg-amber-100 text-amber-700': 'bg-emerald-100 text-emerald-700'
-                      }`}>
-                        {daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-500">
-                      <span>{formatDate(d.closing_date)}</span>
-                      <span>·</span>
-                      <span>{formatCurrency(d.deposit_amount)} EMD</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Recent Activity (CRM) ── */}
