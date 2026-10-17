@@ -30,6 +30,7 @@ interface BorrowerApplication {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
+  emd_funded_cents?: number | null;
   closing_date: string | null;
   app_status: AppStatus;
   submitted_at: string | null;
@@ -129,6 +130,15 @@ function getPhaseIndexForStatus(status: AppStatus | string): number {
 function formatCurrency(val: number | null) {
   if (val == null) return '—';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+}
+
+// Dynamic EMD: FUNDED (cents → dollars) only when emd_funded_cents > 0, else REQUESTED (dollars).
+function getDynamicEmd(app: { deposit_amount: number | null; emd_funded_cents?: number | null }) {
+  const cents = app.emd_funded_cents;
+  if (cents != null && cents > 0) {
+    return { isFunded: true, label: 'Funded EMD', value: formatCurrency(cents / 100) };
+  }
+  return { isFunded: false, label: 'Requested EMD', value: formatCurrency(app.deposit_amount) };
 }
 
 function formatDate(dateStr: string | null) {
@@ -3152,10 +3162,10 @@ const BorrowerDetailContent: React.FC = () => {
 
           {/* ── Key Facts Strip ─────────────────────────────────────── */}
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {/* EMD */}
-            <div className="bg-eb-green-50 border border-eb-green-200 rounded-xl p-3">
-              <p className="text-[10px] font-700 text-eb-green-700 uppercase tracking-wide mb-0.5">EMD</p>
-              <p className="text-base font-display font-700 text-eb-green-900">{formatCurrency(application.deposit_amount)}</p>
+            {/* EMD (dynamic: Requested / Funded) */}
+            <div className={`rounded-xl p-3 border ${getDynamicEmd(application).isFunded ? 'bg-eb-green-50 border-eb-green-200' : 'bg-amber-50 border-amber-200'}`}>
+              <p className={`text-[10px] font-700 uppercase tracking-wide mb-0.5 ${getDynamicEmd(application).isFunded ? 'text-eb-green-700' : 'text-amber-700'}`}>{getDynamicEmd(application).label}</p>
+              <p className={`text-base font-display font-700 ${getDynamicEmd(application).isFunded ? 'text-eb-green-900' : 'text-amber-900'}`}>{getDynamicEmd(application).value}</p>
             </div>
 
             {/* Purchase Price */}
@@ -3547,7 +3557,7 @@ const BorrowerDetailContent: React.FC = () => {
                   { label: 'Property Address', value: application.property_address || '—', span: true },
                   { label: 'Property Type', value: application.property_type || '—' },
                   { label: 'Purchase Price', value: formatCurrency(application.purchase_price) },
-                  { label: 'EMD Amount', value: formatCurrency(application.deposit_amount) },
+                  { label: getDynamicEmd(application).label, value: getDynamicEmd(application).value },
                   { label: 'Target Closing Date', value: formatDate(application.closing_date) },
                   { label: 'Days to Funding', value: application.days_to_funding ? `${application.days_to_funding} days` : '—' },
                   { label: 'Submitted', value: formatDate(application.submitted_at) },
@@ -3919,6 +3929,9 @@ const BorrowerDetailContent: React.FC = () => {
               applicationId={applicationId}
               depositAmount={application.deposit_amount}
               isMockId={isMockId}
+              onFundingSaved={(cents) =>
+                setApplication((prev) => (prev ? { ...prev, emd_funded_cents: cents } : prev))
+              }
             />
           </div>
         </div>

@@ -8,6 +8,7 @@ interface FundingBillingSectionProps {
   applicationId: string;
   depositAmount: number | null; // borrower_applications.deposit_amount (read-only)
   isMockId?: boolean;
+  onFundingSaved?: (emdFundedCents: number | null) => void;
 }
 
 interface FundingData {
@@ -109,6 +110,7 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
   applicationId,
   depositAmount,
   isMockId = false,
+  onFundingSaved,
 }) => {
   // ── Data state ──────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
@@ -308,6 +310,7 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
         funded_date: fundedDate.trim() || null,
         credit_card_payment_enabled: ccEnabled,
       });
+      onFundingSaved?.(parsedCents ?? null);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch {
       setSaveError('An unexpected error occurred. Please try again.');

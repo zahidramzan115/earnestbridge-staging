@@ -16,6 +16,7 @@ interface Deal {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
+  emd_funded_cents?: number | null;
   closing_date: string | null;
   app_status: string;
   submitted_at?: string | null;
@@ -200,6 +201,15 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024;
 function formatCurrency(val: number | null) {
   if (val == null) return '—';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+}
+
+// Dynamic EMD: FUNDED (cents → dollars) only when emd_funded_cents > 0, else REQUESTED (dollars).
+function getDynamicEmd(deal: { deposit_amount: number | null; emd_funded_cents?: number | null }) {
+  const cents = deal.emd_funded_cents;
+  if (cents != null && cents > 0) {
+    return { isFunded: true, label: 'Funded EMD', value: formatCurrency(cents / 100) };
+  }
+  return { isFunded: false, label: 'Requested EMD', value: formatCurrency(deal.deposit_amount) };
 }
 
 function formatDate(dateStr: string | null) {
@@ -765,8 +775,8 @@ export default function DealDetailsContent() {
             <p className="text-sm font-700 text-gray-900 tabular-nums">{formatCurrency(deal.purchase_price)}</p>
           </div>
           <div>
-            <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">EMD Amount</p>
-            <p className="text-sm font-700 text-eb-green-900 tabular-nums">{formatCurrency(deal.deposit_amount)}</p>
+            <p className={`text-[11px] font-display font-600 uppercase tracking-wide mb-1 ${getDynamicEmd(deal).isFunded ? 'text-eb-green-700' : 'text-amber-700'}`}>{getDynamicEmd(deal).label}</p>
+            <p className={`text-sm font-700 tabular-nums ${getDynamicEmd(deal).isFunded ? 'text-eb-green-900' : 'text-amber-800'}`}>{getDynamicEmd(deal).value}</p>
           </div>
           <div>
             <p className="text-[11px] text-gray-400 font-display font-600 uppercase tracking-wide mb-1">Target Closing</p>
