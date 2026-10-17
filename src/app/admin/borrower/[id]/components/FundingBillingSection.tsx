@@ -483,7 +483,7 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
 
         {originalHardDate && !hardDateChanged && (
           <p className="text-[11px] text-gray-400">
-            Saved: {formatDate(originalHardDate)} · Stored in crm_deal_option_cycles cycle_number = 1
+            Saved: {formatDate(originalHardDate)}
           </p>
         )}
 
@@ -605,11 +605,11 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
             <div className="flex items-center justify-between py-2 border-b border-gray-50">
               <div>
                 <p className="text-xs font-display font-600 text-gray-700">Deal Fee</p>
-                <p className="text-[11px] text-gray-400">
-                  {canCalculateFee
-                    ? 'Via calculate_deal_fee_cents() — server-side'
-                    : 'Enter funded amount and funding date to calculate.'}
-                </p>
+                {!canCalculateFee && (
+                  <p className="text-[11px] text-gray-400">
+                    Enter funded amount and funding date to calculate.
+                  </p>
+                )}
               </div>
               <div className="text-right">
                 {feeLoading ? (
@@ -627,7 +627,6 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
             <div className="flex items-center justify-between py-2 border-b border-gray-50">
               <div>
                 <p className="text-xs font-display font-600 text-gray-700">Default Admin Fee</p>
-                <p className="text-[11px] text-gray-400">Informational only — not stored on this Deal.</p>
               </div>
               <span className="text-sm font-display font-600 text-gray-600">
                 {formatCurrencyFromCents(DEFAULT_ADMIN_FEE_CENTS)}
