@@ -524,7 +524,7 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
           <span className="text-xs font-display font-700 text-gray-900">Original Deposit Goes Hard Date</span>
         </div>
         <p className="text-[11px] text-gray-500 leading-relaxed">
-          The date the original EMD deposit goes hard (non-refundable). Stored in Option Cycle 1.
+          The date the original EMD deposit goes hard (non-refundable).
           Admin may set this before funding details are entered.
         </p>
 
