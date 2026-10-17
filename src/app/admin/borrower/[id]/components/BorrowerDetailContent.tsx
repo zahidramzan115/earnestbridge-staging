@@ -3933,6 +3933,7 @@ const BorrowerDetailContent: React.FC = () => {
             <FundingBillingSection
               applicationId={applicationId}
               depositAmount={application.deposit_amount}
+              dueDiligenceDays={application.due_diligence_days ?? null}
               isMockId={isMockId}
               onFundingSaved={(cents) =>
                 setApplication((prev) => (prev ? { ...prev, emd_funded_cents: cents } : prev))

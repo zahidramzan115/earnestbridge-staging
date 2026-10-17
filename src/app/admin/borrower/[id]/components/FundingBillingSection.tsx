@@ -6,7 +6,8 @@ import Icon from '@/components/ui/AppIcon';
 
 interface FundingBillingSectionProps {
   applicationId: string;
-  depositAmount: number | null; // borrower_applications.deposit_amount (read-only)
+  depositAmount: number | null; // borrower_applications.deposit_amount (read-only) — DOLLARS
+  dueDiligenceDays?: number | null; // borrower_applications.due_diligence_days — calendar days
   isMockId?: boolean;
   onFundingSaved?: (emdFundedCents: number | null) => void;
 }
@@ -109,6 +110,7 @@ function getMockHardDate(): string | null {
 const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
   applicationId,
   depositAmount,
+  dueDiligenceDays = null,
   isMockId = false,
   onFundingSaved,
 }) => {
@@ -141,6 +143,11 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
   const [feePreview, setFeePreview] = useState<FeePreview | null>(null);
   const [feeLoading, setFeeLoading] = useState(false);
   const [feeError, setFeeError] = useState<string | null>(null);
+
+  // ── Pre-funding estimate state (estimate result is in CENTS) ────────────────
+  const [estimateCents, setEstimateCents] = useState<number | null>(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
+  const [estimateError, setEstimateError] = useState<string | null>(null);
 
   // ── Load existing data ──────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -243,6 +250,69 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
     }, 600);
     return () => clearTimeout(timer);
   }, [fetchFeePreview]);
+
+  // ── Funding state classification (based on SAVED actual funding data) ───────
+  const savedFundedCents = fundingData.emd_funded_cents;
+  const hasSavedAmount = savedFundedCents != null && savedFundedCents > 0;
+  const hasSavedDate = !!(fundingData.funded_date && fundingData.funded_date.trim());
+  // STATE A: no saved actual funding at all
+  const isPreFunding = !hasSavedAmount && !hasSavedDate;
+
+  const estimateInputsPresent =
+    depositAmount != null &&
+    Number.isFinite(Number(depositAmount)) &&
+    Number(depositAmount) >= 0 &&
+    dueDiligenceDays != null &&
+    Number.isInteger(dueDiligenceDays) &&
+    dueDiligenceDays >= 1 &&
+    dueDiligenceDays <= 999;
+
+  // ── Pre-funding estimate (server-side, read-only) ───────────────────────────
+  useEffect(() => {
+    if (loading || !isPreFunding || !estimateInputsPresent) {
+      setEstimateCents(null);
+      setEstimateError(null);
+      setEstimateLoading(false);
+      return;
+    }
+
+    if (isMockId) {
+      // deposit_amount = DOLLARS; convert to cents exactly once
+      setEstimateCents(Math.round((Number(depositAmount) * 100 * (dueDiligenceDays as number)) / 1000));
+      setEstimateError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setEstimateLoading(true);
+    setEstimateError(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/funding-fee-estimate?application_id=${applicationId}`);
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok) {
+          setEstimateCents(null);
+          setEstimateError(json.error ?? 'Failed to calculate estimate.');
+          return;
+        }
+        setEstimateCents(
+          typeof json.estimated_deal_fee_cents === 'number' ? json.estimated_deal_fee_cents : null
+        );
+      } catch {
+        if (!cancelled) {
+          setEstimateCents(null);
+          setEstimateError('Failed to calculate estimate.');
+        }
+      } finally {
+        if (!cancelled) setEstimateLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, isPreFunding, estimateInputsPresent, applicationId, isMockId, depositAmount, dueDiligenceDays]);
 
   // ── Validation for funding fields ───────────────────────────────────────────
   function validate(): string | null {
@@ -386,6 +456,32 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
       : null;
 
   const hardDateChanged = hardDateInput !== (originalHardDate ?? '');
+
+  // STATE B prompt: actual funding has begun (saved) but authoritative inputs are incomplete
+  let fundedInputPrompt: string | null = null;
+  if (!isPreFunding) {
+    if (!hasSavedAmount) {
+      fundedInputPrompt = 'Enter Actual EMD Funded to calculate the funded Deal Fee.';
+    } else if (!hasSavedDate) {
+      fundedInputPrompt = 'Enter the Funding Date to calculate the funded Deal Fee.';
+    } else if (!originalHardDate) {
+      fundedInputPrompt = 'Enter the Deposit Goes Hard Date to calculate the funded Deal Fee.';
+    }
+  }
+
+  const estimateInitialTotal =
+    estimateCents !== null ? estimateCents + DEFAULT_ADMIN_FEE_CENTS : null;
+
+  let estimateMissingMessage: string | null = null;
+  if (isPreFunding && !estimateInputsPresent) {
+    if (dueDiligenceDays == null) {
+      estimateMissingMessage = 'Due Diligence Period is required to estimate the Deal Fee.';
+    } else if (depositAmount == null) {
+      estimateMissingMessage = 'Requested EMD is required to estimate the Deal Fee.';
+    } else {
+      estimateMissingMessage = 'Requested EMD and Due Diligence Period are required to estimate the Deal Fee.';
+    }
+  }
 
   // ── Loading state ───────────────────────────────────────────────────────────
   if (loading) {
@@ -560,103 +656,182 @@ const FundingBillingSection: React.FC<FundingBillingSectionProps> = ({
       )}
 
       {/* ── Initial Deal Fee Preview ── */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/60">
-          <Icon name="CalculatorIcon" size={14} className="text-gray-500" />
-          <span className="text-xs font-display font-700 text-gray-700">Initial Deal Fee Preview</span>
-          <span className="ml-auto text-[10px] text-gray-400 font-display font-600">Read Only · Not saved</span>
-        </div>
-
-        <div className="p-4 space-y-3">
-          {/* Missing hard date warning */}
-          {!originalHardDate && (
-            <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
-              <Icon name="ExclamationTriangleIcon" size={13} className="flex-shrink-0 mt-0.5" />
-              <span>Original Deposit Goes Hard Date is required to calculate the Deal Fee.</span>
-            </div>
-          )}
-
-          {/* Fee error (e.g. hard date <= funding date) */}
-          {feeError && (
-            <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
-              <Icon name="ExclamationCircleIcon" size={13} className="flex-shrink-0 mt-0.5" />
-              <span>{feeError}</span>
-            </div>
-          )}
-
-          {/* Preview rows */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between py-2 border-b border-gray-50">
-              <div>
-                <p className="text-xs font-display font-600 text-gray-700">Billable Calendar Days</p>
-                <p className="text-[11px] text-gray-400">Hard Date − Funding Date (calendar days)</p>
-              </div>
-              <div className="text-right">
-                {feeLoading ? (
-                  <Icon name="ArrowPathIcon" size={13} className="animate-spin text-gray-300" />
-                ) : feePreview ? (
-                  <span className="text-sm font-display font-700 text-gray-900">{feePreview.billable_days}</span>
-                ) : (
-                  <span className="text-sm font-display font-600 text-gray-300">—</span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between py-2 border-b border-gray-50">
-              <div>
-                <p className="text-xs font-display font-600 text-gray-700">Deal Fee</p>
-                {!canCalculateFee && (
-                  <p className="text-[11px] text-gray-400">
-                    Enter funded amount and funding date to calculate.
-                  </p>
-                )}
-              </div>
-              <div className="text-right">
-                {feeLoading ? (
-                  <Icon name="ArrowPathIcon" size={13} className="animate-spin text-gray-300" />
-                ) : feePreview ? (
-                  <span className="text-sm font-display font-700 text-emerald-700">
-                    {formatCurrencyFromCents(feePreview.deal_fee_cents)}
-                  </span>
-                ) : (
-                  <span className="text-sm font-display font-600 text-gray-300">—</span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between py-2 border-b border-gray-50">
-              <div>
-                <p className="text-xs font-display font-600 text-gray-700">Default Admin Fee</p>
-              </div>
-              <span className="text-sm font-display font-600 text-gray-600">
-                {formatCurrencyFromCents(DEFAULT_ADMIN_FEE_CENTS)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between py-2">
-              <div>
-                <p className="text-xs font-display font-700 text-gray-900">Default Initial Invoice Total</p>
-                <p className="text-[11px] text-gray-400">Deal Fee + Admin Fee. Before any Admin Fee discount or waiver.</p>
-              </div>
-              <div className="text-right">
-                {feeLoading ? (
-                  <Icon name="ArrowPathIcon" size={13} className="animate-spin text-gray-300" />
-                ) : defaultInitialTotal !== null ? (
-                  <span className="text-sm font-display font-700 text-eb-green-900">
-                    {formatCurrencyFromCents(defaultInitialTotal)}
-                  </span>
-                ) : (
-                  <span className="text-sm font-display font-600 text-gray-300">—</span>
-                )}
-              </div>
-            </div>
+      {isPreFunding ? (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+            <Icon name="CalculatorIcon" size={14} className="text-gray-500" />
+            <span className="text-xs font-display font-700 text-gray-700">Pre-Funding Deal Fee Estimate</span>
+            <span className="ml-auto text-[10px] text-gray-400 font-display font-600">Read Only · Not saved</span>
           </div>
 
-          <p className="text-[11px] text-gray-400 pt-1 border-t border-gray-50">
-            This is a preview only. No invoice is created. Future invoices can discount or waive the Admin Fee.
-          </p>
+          <div className="p-4 space-y-3">
+            {estimateMissingMessage && (
+              <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                <Icon name="ExclamationTriangleIcon" size={13} className="flex-shrink-0 mt-0.5" />
+                <span>{estimateMissingMessage}</span>
+              </div>
+            )}
+
+            {estimateError && !estimateMissingMessage && (
+              <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+                <Icon name="ExclamationCircleIcon" size={13} className="flex-shrink-0 mt-0.5" />
+                <span>{estimateError}</span>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                <p className="text-xs font-display font-600 text-gray-700">Requested EMD</p>
+                <span className="text-sm font-display font-600 text-gray-900">
+                  {depositAmount != null ? formatCurrencyFromDollars(depositAmount) : '—'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                <p className="text-xs font-display font-600 text-gray-700">Due Diligence Period</p>
+                <span className="text-sm font-display font-600 text-gray-900">
+                  {dueDiligenceDays != null ? `${dueDiligenceDays} ${dueDiligenceDays === 1 ? 'Day' : 'Days'}` : '—'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                <p className="text-xs font-display font-600 text-gray-700">Estimated Deal Fee</p>
+                {estimateLoading ? (
+                  <Icon name="ArrowPathIcon" size={13} className="animate-spin text-gray-300" />
+                ) : estimateCents !== null ? (
+                  <span className="text-sm font-display font-700 text-emerald-700">
+                    {formatCurrencyFromCents(estimateCents)}
+                  </span>
+                ) : (
+                  <span className="text-sm font-display font-600 text-gray-300">—</span>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                <p className="text-xs font-display font-600 text-gray-700">Default Admin Fee</p>
+                <span className="text-sm font-display font-600 text-gray-600">
+                  {formatCurrencyFromCents(DEFAULT_ADMIN_FEE_CENTS)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <p className="text-xs font-display font-700 text-gray-900">Estimated Initial Invoice Total</p>
+                {estimateLoading ? (
+                  <Icon name="ArrowPathIcon" size={13} className="animate-spin text-gray-300" />
+                ) : estimateInitialTotal !== null ? (
+                  <span className="text-sm font-display font-700 text-eb-green-900">
+                    {formatCurrencyFromCents(estimateInitialTotal)}
+                  </span>
+                ) : (
+                  <span className="text-sm font-display font-600 text-gray-300">—</span>
+                )}
+              </div>
+            </div>
+
+            <p className="text-[11px] text-gray-400 pt-1 border-t border-gray-50">
+              Estimate only. Final Deal Fee is calculated from Actual EMD Funded, Funding Date, and Deposit Goes Hard Date. No invoice is created.
+            </p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+            <Icon name="CalculatorIcon" size={14} className="text-gray-500" />
+            <span className="text-xs font-display font-700 text-gray-700">Initial Deal Fee Preview</span>
+            <span className="ml-auto text-[10px] text-gray-400 font-display font-600">Read Only · Not saved</span>
+          </div>
+
+          <div className="p-4 space-y-3">
+            {/* Funded input prompt (STATE B) */}
+            {fundedInputPrompt && (
+              <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                <Icon name="ExclamationTriangleIcon" size={13} className="flex-shrink-0 mt-0.5" />
+                <span>{fundedInputPrompt}</span>
+              </div>
+            )}
+
+            {/* Fee error (e.g. hard date <= funding date) */}
+            {feeError && (
+              <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+                <Icon name="ExclamationCircleIcon" size={13} className="flex-shrink-0 mt-0.5" />
+                <span>{feeError}</span>
+              </div>
+            )}
+
+            {/* Preview rows */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                <div>
+                  <p className="text-xs font-display font-600 text-gray-700">Billable Calendar Days</p>
+                  <p className="text-[11px] text-gray-400">Hard Date − Funding Date (calendar days)</p>
+                </div>
+                <div className="text-right">
+                  {feeLoading ? (
+                    <Icon name="ArrowPathIcon" size={13} className="animate-spin text-gray-300" />
+                  ) : feePreview ? (
+                    <span className="text-sm font-display font-700 text-gray-900">{feePreview.billable_days}</span>
+                  ) : (
+                    <span className="text-sm font-display font-600 text-gray-300">—</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                <div>
+                  <p className="text-xs font-display font-600 text-gray-700">Deal Fee</p>
+                  {!canCalculateFee && (
+                    <p className="text-[11px] text-gray-400">
+                      Enter funded amount and funding date to calculate.
+                    </p>
+                  )}
+                </div>
+                <div className="text-right">
+                  {feeLoading ? (
+                    <Icon name="ArrowPathIcon" size={13} className="animate-spin text-gray-300" />
+                  ) : feePreview ? (
+                    <span className="text-sm font-display font-700 text-emerald-700">
+                      {formatCurrencyFromCents(feePreview.deal_fee_cents)}
+                    </span>
+                  ) : (
+                    <span className="text-sm font-display font-600 text-gray-300">—</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                <div>
+                  <p className="text-xs font-display font-600 text-gray-700">Default Admin Fee</p>
+                </div>
+                <span className="text-sm font-display font-600 text-gray-600">
+                  {formatCurrencyFromCents(DEFAULT_ADMIN_FEE_CENTS)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <p className="text-xs font-display font-700 text-gray-900">Default Initial Invoice Total</p>
+                  <p className="text-[11px] text-gray-400">Deal Fee + Admin Fee. Before any Admin Fee discount or waiver.</p>
+                </div>
+                <div className="text-right">
+                  {feeLoading ? (
+                    <Icon name="ArrowPathIcon" size={13} className="animate-spin text-gray-300" />
+                  ) : defaultInitialTotal !== null ? (
+                    <span className="text-sm font-display font-700 text-eb-green-900">
+                      {formatCurrencyFromCents(defaultInitialTotal)}
+                    </span>
+                  ) : (
+                    <span className="text-sm font-display font-600 text-gray-300">—</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-gray-400 pt-1 border-t border-gray-50">
+              This is a preview only. No invoice is created. Future invoices can discount or waive the Admin Fee.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Credit Card Payment Eligibility ── */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
