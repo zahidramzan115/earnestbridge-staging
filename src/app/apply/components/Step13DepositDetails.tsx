@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useId } from 'react';
 import { useForm } from 'react-hook-form';
 import { ApplicationFormData } from './BorrowerApplicationForm';
 import Icon from '@/components/ui/AppIcon';
@@ -14,6 +14,74 @@ type FormValues = Pick<ApplicationFormData, 'companyName' | 'companyType' | 'pro
 
 const PROPERTY_TYPES = ['Multifamily', 'Office', 'Retail', 'Industrial', 'Mixed-Use', 'Land', 'Hotel/Hospitality', 'Self-Storage', 'Other'];
 const COMPANY_TYPES = ['LLC', 'LP', 'Corporation', 'Partnership', 'Sole Proprietorship', 'Trust', 'Other'];
+
+const DD_TOOLTIP_TEXT = 'We only support refundable deposits during due diligence period.';
+
+function DueDiligenceInfoTip() {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  const tipId = useId();
+  const open = hovered || focused || pinned;
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setPinned(false);
+        setHovered(false);
+        setFocused(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPinned(false);
+        setHovered(false);
+        setFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <span
+      ref={wrapperRef}
+      className="relative inline-flex align-middle ml-1.5"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <button
+        type="button"
+        aria-label="More information about due diligence period"
+        aria-describedby={open ? tipId : undefined}
+        aria-expanded={open}
+        onClick={() => setPinned((p) => !p)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        className="inline-flex text-gray-400 hover:text-eb-green-800 focus:text-eb-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-eb-green-900/30 rounded-full cursor-help"
+      >
+        <Icon name="InformationCircleIcon" size={15} />
+      </button>
+      {open && (
+        <span
+          id={tipId}
+          role="tooltip"
+          className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-30 w-56 px-3 py-2 rounded-lg bg-gray-900 text-white text-xs font-normal leading-snug shadow-lg normal-case"
+        >
+          {DD_TOOLTIP_TEXT}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function formatWithCommas(value: string): string {
   const digits = value.replace(/[^0-9]/g, '');
@@ -167,15 +235,7 @@ export default function Step13DepositDetails({ data, onComplete, onBack }: Props
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   How many days is your due diligence period? <span className="text-red-500">*</span>
-                  <span
-                    className="inline-flex align-middle ml-1.5 text-gray-400 hover:text-eb-green-800 cursor-help"
-                    title="We only support refundable deposits during due diligence period."
-                    aria-label="We only support refundable deposits during due diligence period."
-                    tabIndex={0}
-                    role="img"
-                  >
-                    <Icon name="InformationCircleIcon" size={15} />
-                  </span>
+                  <DueDiligenceInfoTip />
                 </label>
                 <input
                   type="number"
@@ -184,7 +244,6 @@ export default function Step13DepositDetails({ data, onComplete, onBack }: Props
                   step={1}
                   inputMode="numeric"
                   placeholder="e.g. 30"
-                  title="We only support refundable deposits during due diligence period."
                   className={`w-full sm:w-40 px-3.5 py-2.5 text-sm border rounded-lg outline-none transition-all focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900 ${errors.dueDiligenceDays ? 'border-red-400 bg-red-50' : 'border-gray-300 hover:border-gray-400'}`}
                   {...register('dueDiligenceDays', {
                     validate: (value) => {
