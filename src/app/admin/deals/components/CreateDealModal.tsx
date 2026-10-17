@@ -44,7 +44,9 @@ function DueDiligenceInfoTip() {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pinned, setPinned] = useState(false);
+  const [placement, setPlacement] = useState<{ below: boolean; shiftX: number }>({ below: false, shiftX: 0 });
   const wrapperRef = useRef<HTMLSpanElement>(null);
+  const tipRef = useRef<HTMLSpanElement>(null);
   const tipId = useId();
   const open = hovered || focused || pinned;
 
@@ -74,6 +76,40 @@ function DueDiligenceInfoTip() {
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const reposition = () => {
+      const wrapper = wrapperRef.current;
+      const tip = tipRef.current;
+      if (!wrapper || !tip) return;
+      const iconRect = wrapper.getBoundingClientRect();
+      const tipWidth = tip.offsetWidth;
+      const tipHeight = tip.offsetHeight;
+      const margin = 16;
+      const viewportWidth = document.documentElement.clientWidth;
+      // Default: tooltip right edge aligned with icon right edge, extending left.
+      const defaultLeft = iconRect.right - tipWidth;
+      let shiftX = 0;
+      if (defaultLeft < margin) {
+        shiftX = margin - defaultLeft;
+      }
+      if (iconRect.right + shiftX > viewportWidth - margin) {
+        shiftX = viewportWidth - margin - iconRect.right;
+      }
+      const below = iconRect.top - tipHeight - 8 < 8;
+      setPlacement((prev) =>
+        prev.below === below && prev.shiftX === shiftX ? prev : { below, shiftX }
+      );
+    };
+    reposition();
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [open]);
+
   return (
     <span
       ref={wrapperRef}
@@ -95,11 +131,18 @@ function DueDiligenceInfoTip() {
       </button>
       {open && (
         <span
+          ref={tipRef}
           id={tipId}
           role="tooltip"
-          className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-30 w-56 px-3 py-2 rounded-lg bg-gray-900 text-white text-xs font-normal leading-snug shadow-lg normal-case"
+          style={{ right: -placement.shiftX, width: 260, maxWidth: 'min(280px, calc(100vw - 32px))' }}
+          className={`absolute z-30 ${placement.below ? 'top-full mt-2' : 'bottom-full mb-2'} block whitespace-normal break-words text-left px-3 py-2.5 rounded-lg bg-gray-900 text-white text-xs font-normal leading-relaxed shadow-lg normal-case`}
         >
           {DD_TOOLTIP_TEXT}
+          <span
+            aria-hidden="true"
+            style={{ right: 3 + placement.shiftX }}
+            className={`absolute w-2 h-2 rotate-45 bg-gray-900 ${placement.below ? '-top-1' : '-bottom-1'}`}
+          />
         </span>
       )}
     </span>
