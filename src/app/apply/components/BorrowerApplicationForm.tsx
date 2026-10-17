@@ -295,6 +295,8 @@ export default function BorrowerApplicationForm() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${supabaseAnonKey}`,
           };
+          const ddParsed = formData.dueDiligenceDays ? parseInt(formData.dueDiligenceDays, 10) : null;
+          const dueDiligenceDays = ddParsed !== null && Number.isInteger(ddParsed) && ddParsed >= 1 && ddParsed <= 999 ? ddParsed : null;
           const borrowerPayload = {
             emailType: 'application_submitted',
             borrower: {
@@ -306,7 +308,7 @@ export default function BorrowerApplicationForm() {
               propertyAddress: formData.propertyAddress,
               depositAmount: formData.depositAmount,
               purchasePrice: formData.purchasePrice,
-              closingDate: '',
+              dueDiligenceDays,
             },
           };
           const adminPayload = {
@@ -323,7 +325,7 @@ export default function BorrowerApplicationForm() {
               propertyType: formData.propertyType,
               depositAmount: formData.depositAmount,
               purchasePrice: formData.purchasePrice,
-              closingDate: '',
+              dueDiligenceDays,
             },
           };
           await Promise.allSettled([

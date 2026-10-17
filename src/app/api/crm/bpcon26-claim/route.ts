@@ -454,6 +454,7 @@ export async function POST(request: Request) {
               activeDeal: active_deal,
               estimatedEmdAmount: estimated_emd_amount,
               targetClosingDate: target_closing_date || '',
+              dueDiligenceDays: due_diligence_days,
               promoCode: promoCode,
               isNewContact,
               contactUrl,

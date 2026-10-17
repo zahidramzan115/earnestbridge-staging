@@ -399,6 +399,7 @@ export async function POST(request: Request) {
               statusLabel: isNewContact
                 ? `New Lead from ${lead_source}`
                 : 'Existing Contact — New Inquiry',
+              dueDiligenceDays: due_diligence_days,
             },
           }),
         });
