@@ -220,12 +220,11 @@ export async function GET(
 
     // PATH B — approved CRM portal contact with explicit deal relationship
     if (!accessMode) {
-      const { data: approvedContact, error: contactError } = await supabase
+      const { data: approvedContacts, error: contactError } = await supabase
         .from('crm_contacts')
         .select('id')
         .eq('portal_user_id', user.id)
-        .eq('portal_link_status', 'approved')
-        .maybeSingle();
+        .eq('portal_link_status', 'approved');
 
       if (contactError) {
         return NextResponse.json(
@@ -234,13 +233,15 @@ export async function GET(
         );
       }
 
-      if (approvedContact) {
-        const { data: dealContact, error: dealContactError } = await supabase
+      const approvedContactIds = (approvedContacts ?? []).map((c: { id: string }) => c.id);
+
+      if (approvedContactIds.length > 0) {
+        const { data: dealContacts, error: dealContactError } = await supabase
           .from('crm_deal_contacts')
           .select('deal_id')
-          .eq('contact_id', approvedContact.id)
+          .in('contact_id', approvedContactIds)
           .eq('deal_id', dealId)
-          .maybeSingle();
+          .limit(1);
 
         if (dealContactError) {
           return NextResponse.json(
@@ -249,7 +250,7 @@ export async function GET(
           );
         }
 
-        if (dealContact) accessMode = 'contact';
+        if (dealContacts && dealContacts.length > 0) accessMode = 'contact';
       }
     }
 

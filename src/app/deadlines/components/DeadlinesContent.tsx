@@ -74,8 +74,15 @@ interface DisplayDeadline {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function formatDateShort(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  // DATE-only (YYYY-MM-DD): format directly from components, no Date parsing,
+  // so the rendered day can never shift with browser timezone.
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr ?? '');
+  if (!match) return dateStr ?? '';
+  const year = Number(match[1]);
+  const monthIdx = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  if (monthIdx < 0 || monthIdx > 11) return dateStr;
+  return `${MONTHS[monthIdx]} ${day}, ${year}`;
 }
 
 // Safe UTC-based days calculation to avoid timezone day-shifting

@@ -169,12 +169,11 @@ export async function GET(
     const supabase = getServiceClient();
 
     // ── 4. Approved CRM contact ───────────────────────────────────────────
-    const { data: approvedContact, error: contactError } = await supabase
+    const { data: approvedContacts, error: contactError } = await supabase
       .from('crm_contacts')
       .select('id')
       .eq('portal_user_id', user.id)
-      .eq('portal_link_status', 'approved')
-      .maybeSingle();
+      .eq('portal_link_status', 'approved');
 
     if (contactError) {
       console.error('[portal/receipt] contact fetch failed:', {
@@ -186,7 +185,10 @@ export async function GET(
         { status: 500, headers: NO_STORE_HEADERS }
       );
     }
-    if (!approvedContact) return notFound();
+    const approvedContactIds = (approvedContacts ?? []).map(
+      (c: { id: string }) => c.id
+    );
+    if (approvedContactIds.length === 0) return notFound();
 
     // ── 5. Load invoice ───────────────────────────────────────────────────
     const { data: invoice, error: invoiceError } = await supabase
@@ -208,12 +210,12 @@ export async function GET(
     if (!invoice || !invoice.application_id) return notFound();
 
     // ── 6. Explicit Deal ↔ Contact authorization ──────────────────────────
-    const { data: dealContact, error: dealContactError } = await supabase
+    const { data: dealContacts, error: dealContactError } = await supabase
       .from('crm_deal_contacts')
       .select('deal_id')
-      .eq('contact_id', approvedContact.id)
+      .in('contact_id', approvedContactIds)
       .eq('deal_id', invoice.application_id)
-      .maybeSingle();
+      .limit(1);
 
     if (dealContactError) {
       console.error('[portal/receipt] deal contact fetch failed:', {
@@ -225,7 +227,7 @@ export async function GET(
         { status: 500, headers: NO_STORE_HEADERS }
       );
     }
-    if (!dealContact) return notFound();
+    if (!dealContacts || dealContacts.length === 0) return notFound();
 
     // ── 7. Invoice status eligibility ─────────────────────────────────────
     // Deterministic: ineligible status (draft/issuing/void) → generic 404.

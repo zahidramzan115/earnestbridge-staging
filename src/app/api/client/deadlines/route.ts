@@ -261,12 +261,18 @@ export async function GET() {
     .order('application_id', { ascending: true })
     .order('cycle_number', { ascending: false });
 
-  // Option cycles are optional — don't fail the whole response if this errors
+  // A backend failure must never look like "no option cycle".
+  // No matching cycles → HTTP 200 with optionCycles: [].
+  // Query error → generic HTTP 500 (no provider/database details exposed).
+  if (optionError) {
+    return NextResponse.json({ error: 'Failed to fetch deadlines' }, { status: 500 });
+  }
+
   const optionCycles: ClientOptionCycleItem[] = [];
 
   // Keep only the latest (highest cycle_number) client-relevant cycle per application
   const latestByApplication = new Map<string, any>();
-  if (!optionError && rawOptionCyclesAll) {
+  if (rawOptionCyclesAll) {
     for (const row of rawOptionCyclesAll as any[]) {
       const existing = latestByApplication.get(row.application_id);
       if (!existing || row.cycle_number > existing.cycle_number) {
@@ -276,7 +282,7 @@ export async function GET() {
   }
   const rawOptionCycles = Array.from(latestByApplication.values());
 
-  if (!optionError && rawOptionCycles) {
+  if (rawOptionCycles) {
     for (const row of rawOptionCycles) {
       // Derive timeliness server-side — never trust browser
       // Use actual_amendment_received_at as canonical field; fall back to

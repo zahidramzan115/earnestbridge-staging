@@ -163,12 +163,11 @@ export async function GET(
   // ── Step 4: Require an approved CRM Contact ───────────────────────────────
   // Select only the minimum needed field (id).
   // Do not fetch unnecessary Contact fields.
-  const { data: approvedContact, error: contactError } = await supabase
+  const { data: approvedContacts, error: contactError } = await supabase
     .from('crm_contacts')
     .select('id')
     .eq('portal_user_id', authenticatedUserId)
-    .eq('portal_link_status', 'approved')
-    .maybeSingle();
+    .eq('portal_link_status', 'approved');
 
   if (contactError) {
     // DB error — fail closed, do not expose raw Supabase error
@@ -178,7 +177,9 @@ export async function GET(
     );
   }
 
-  if (!approvedContact) {
+  const approvedContactIds = (approvedContacts ?? []).map((c: { id: string }) => c.id);
+
+  if (approvedContactIds.length === 0) {
     // No approved linked Contact — fail closed.
     // Do not reveal whether the Deal exists.
     return NextResponse.json(
@@ -191,12 +192,12 @@ export async function GET(
   // This explicit Deal ↔ Contact relationship is mandatory.
   // DO NOT fall back to borrower_applications.user_id, company membership,
   // email matching, contact.company_id, or legacy portal ownership.
-  const { data: dealContact, error: dealContactError } = await supabase
+  const { data: dealContacts, error: dealContactError } = await supabase
     .from('crm_deal_contacts')
     .select('deal_id')
-    .eq('contact_id', approvedContact.id)
+    .in('contact_id', approvedContactIds)
     .eq('deal_id', dealId)
-    .maybeSingle();
+    .limit(1);
 
   if (dealContactError) {
     return NextResponse.json(
@@ -205,7 +206,7 @@ export async function GET(
     );
   }
 
-  if (!dealContact) {
+  if (!dealContacts || dealContacts.length === 0) {
     // No explicit Deal ↔ Contact relationship — fail closed.
     // Do not reveal whether the Deal exists.
     return NextResponse.json(

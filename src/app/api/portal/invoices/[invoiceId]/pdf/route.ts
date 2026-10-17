@@ -167,12 +167,11 @@ export async function GET(
     // ── 4. Require approved CRM Contact ───────────────────────────────────
     // The authenticated user must have an approved CRM Contact linked to
     // their auth.uid(). Company membership alone grants nothing.
-    const { data: approvedContact, error: contactError } = await supabase
+    const { data: approvedContacts, error: contactError } = await supabase
       .from('crm_contacts')
       .select('id')
       .eq('portal_user_id', authenticatedUserId)
-      .eq('portal_link_status', 'approved')
-      .maybeSingle();
+      .eq('portal_link_status', 'approved');
 
     if (contactError) {
       console.error('[portal/invoices/pdf] contact fetch failed:', {
@@ -185,9 +184,13 @@ export async function GET(
       );
     }
 
+    const approvedContactIds = (approvedContacts ?? []).map(
+      (c: { id: string }) => c.id
+    );
+
     // No approved Contact — return same generic not-found as inaccessible invoice.
     // Do NOT reveal whether an invoice ID is valid but belongs to another client.
-    if (!approvedContact) {
+    if (approvedContactIds.length === 0) {
       return NextResponse.json(
         { error: 'invoice_not_found' },
         { status: 404, headers: NO_STORE_HEADERS }
@@ -230,12 +233,12 @@ export async function GET(
     // invoice.application_id. This is the ONLY authorization path.
     // DO NOT fall back to: borrower_applications.user_id, company membership,
     //                       email matching, primary_contact_id, invoice contact_id.
-    const { data: dealContact, error: dealContactError } = await supabase
+    const { data: dealContacts, error: dealContactError } = await supabase
       .from('crm_deal_contacts')
       .select('deal_id')
-      .eq('contact_id', approvedContact.id)
+      .in('contact_id', approvedContactIds)
       .eq('deal_id', invoice.application_id)
-      .maybeSingle();
+      .limit(1);
 
     if (dealContactError) {
       console.error('[portal/invoices/pdf] deal contact fetch failed:', {
@@ -251,7 +254,7 @@ export async function GET(
     // No explicit Deal ↔ Contact relationship — return same 404 as missing invoice.
     // This is intentional: do NOT return 403, which would allow an authenticated
     // user to determine whether another customer's invoice UUID exists.
-    if (!dealContact) {
+    if (!dealContacts || dealContacts.length === 0) {
       return NextResponse.json(
         { error: 'invoice_not_found' },
         { status: 404, headers: NO_STORE_HEADERS }
