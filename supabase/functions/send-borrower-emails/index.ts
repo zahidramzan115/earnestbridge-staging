@@ -36,6 +36,24 @@ function escapeHtmlForInvoice(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// ─── Due Diligence Period helpers (7F-3B1) ───────────────────────────────────
+// dueDiligenceDays is OPTIONAL during the transition. When present it must be a
+// finite integer in 1–999. Invalid or absent values return null so the row is
+// simply omitted — never derived from any closing date and never invented.
+// Informational only; not used by option-cycle logic.
+function parseDueDiligenceDays(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : NaN;
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 999) return null;
+  return n;
+}
+
+function dueDiligenceRowHtml(value: unknown, labelWidthStyle = ""): string {
+  const days = parseDueDiligenceDays(value);
+  if (days === null) return "";
+  return `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;${labelWidthStyle}">Due Diligence Period</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px;">${days} ${days === 1 ? "Day" : "Days"}</td></tr>`;
+}
+
 // ─── Deterministic invoice footer (invoice_issued only) ───────────────────────
 // Contains NO runtime date, year, or timestamp so the Resend payload remains
 // byte-for-byte identical across retries using the same Idempotency-Key.
@@ -254,7 +272,7 @@ serve(async (req) => {
                 ${application?.propertyAddress ? `<tr><td style="padding: 7px 0; color: #6b7280; width: 45%; font-size: 14px;">Property Address</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px;">${application.propertyAddress}</td></tr>` : ""}
                 ${application?.depositAmount ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">EMD Amount</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px; color: #16a34a;">$${Number(application.depositAmount).toLocaleString()}</td></tr>` : ""}
                 ${application?.purchasePrice ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Purchase Price</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px;">$${Number(application.purchasePrice).toLocaleString()}</td></tr>` : ""}
-                ${application?.closingDate ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Target Closing Date</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px;">${application.closingDate}</td></tr>` : ""}
+                ${dueDiligenceRowHtml(application?.dueDiligenceDays)}
               </table>
             </div>
 
@@ -483,7 +501,7 @@ serve(async (req) => {
                 ${application?.propertyType ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Property Type</td><td style="padding: 7px 0; font-size: 14px;">${application.propertyType}</td></tr>` : ""}
                 ${application?.depositAmount ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">EMD Amount</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px; color: #16a34a;">$${Number(application.depositAmount).toLocaleString()}</td></tr>` : ""}
                 ${application?.purchasePrice ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Purchase Price</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px;">$${Number(application.purchasePrice).toLocaleString()}</td></tr>` : ""}
-                ${application?.closingDate ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Closing Date</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px;">${application.closingDate}</td></tr>` : ""}
+                ${dueDiligenceRowHtml(application?.dueDiligenceDays)}
                 ${application?.newStatus ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Stage</td><td style="padding: 7px 0; font-size: 14px;">${application.statusLabel || application.newStatus}</td></tr>` : ""}
               </table>
             </div>
@@ -925,7 +943,7 @@ serve(async (req) => {
                 <tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Email</td><td style="padding: 7px 0; font-size: 14px;"><a href="mailto:${borrower.email}" style="color: #2563eb; font-weight: 600;">${borrower.email}</a></td></tr>
                 <tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Active Deal</td><td style="padding: 7px 0; font-size: 14px; font-weight: 700;">${application?.activeDeal === true ? "Yes" : application?.activeDeal === false ? "No" : "Not specified"}</td></tr>
                 ${application?.estimatedEmdAmount ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">EMD Amount</td><td style="padding: 7px 0; font-size: 14px; font-weight: 700; color: #16a34a;">$${Number(application.estimatedEmdAmount).toLocaleString()}</td></tr>` : ""}
-                ${application?.targetClosingDate ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Target Close</td><td style="padding: 7px 0; font-size: 14px;">${application.targetClosingDate}</td></tr>` : ""}
+                ${dueDiligenceRowHtml(application?.dueDiligenceDays)}
                 <tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Contact Type</td><td style="padding: 7px 0; font-size: 14px; font-weight: 700;">${application?.isNewContact ? "🆕 New Contact" : "🔄 Existing Contact"}</td></tr>
               </table>
             </div>
