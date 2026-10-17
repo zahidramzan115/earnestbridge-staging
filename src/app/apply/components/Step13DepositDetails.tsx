@@ -10,7 +10,7 @@ interface Props {
   onBack: () => void;
 }
 
-type FormValues = Pick<ApplicationFormData, 'companyName' | 'companyType' | 'propertyAddress' | 'propertyType' | 'closingDate'>;
+type FormValues = Pick<ApplicationFormData, 'companyName' | 'companyType' | 'propertyAddress' | 'propertyType' | 'dueDiligenceDays'>;
 
 const PROPERTY_TYPES = ['Multifamily', 'Office', 'Retail', 'Industrial', 'Mixed-Use', 'Land', 'Hotel/Hospitality', 'Self-Storage', 'Other'];
 const COMPANY_TYPES = ['LLC', 'LP', 'Corporation', 'Partnership', 'Sole Proprietorship', 'Trust', 'Other'];
@@ -41,7 +41,7 @@ export default function Step13DepositDetails({ data, onComplete, onBack }: Props
       companyType: data.companyType,
       propertyAddress: data.propertyAddress,
       propertyType: data.propertyType,
-      closingDate: data.closingDate,
+      dueDiligenceDays: data.dueDiligenceDays,
     },
   });
 
@@ -165,22 +165,38 @@ export default function Step13DepositDetails({ data, onComplete, onBack }: Props
                 {errors.propertyType && <p className="mt-1 text-xs text-red-600 flex items-center gap-1"><Icon name="ExclamationCircleIcon" size={12} />{errors.propertyType.message}</p>}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Target Closing Date <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  How many days is your due diligence period? <span className="text-red-500">*</span>
+                  <span
+                    className="inline-flex align-middle ml-1.5 text-gray-400 hover:text-eb-green-800 cursor-help"
+                    title="We only support refundable deposits during due diligence period."
+                    aria-label="We only support refundable deposits during due diligence period."
+                    tabIndex={0}
+                    role="img"
+                  >
+                    <Icon name="InformationCircleIcon" size={15} />
+                  </span>
+                </label>
                 <input
-                  type="date"
-                  className={`w-full px-3.5 py-2.5 text-sm border rounded-lg outline-none transition-all focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900 ${errors.closingDate ? 'border-red-400 bg-red-50' : 'border-gray-300 hover:border-gray-400'}`}
-                  {...register('closingDate', {
-                    required: 'Closing date is required',
+                  type="number"
+                  min={1}
+                  max={999}
+                  step={1}
+                  inputMode="numeric"
+                  placeholder="e.g. 30"
+                  title="We only support refundable deposits during due diligence period."
+                  className={`w-full sm:w-40 px-3.5 py-2.5 text-sm border rounded-lg outline-none transition-all focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900 ${errors.dueDiligenceDays ? 'border-red-400 bg-red-50' : 'border-gray-300 hover:border-gray-400'}`}
+                  {...register('dueDiligenceDays', {
                     validate: (value) => {
-                      if (!value) return 'Closing date is required';
-                      const today = new Date();
-                      today.setHours(0, 0, 0, 0);
-                      const selected = new Date(value + 'T00:00:00');
-                      return selected > today || 'Target closing date must be a future date';
+                      const v = String(value ?? '').trim();
+                      if (!/^\d+$/.test(v)) return 'Enter a due diligence period between 1 and 999 days.';
+                      const n = parseInt(v, 10);
+                      return (n >= 1 && n <= 999) || 'Enter a due diligence period between 1 and 999 days.';
                     },
                   })}
                 />
-                {errors.closingDate && <p className="mt-1 text-xs text-red-600 flex items-center gap-1"><Icon name="ExclamationCircleIcon" size={12} />{errors.closingDate.message}</p>}
+                <p className="mt-1 text-xs text-gray-500">Calendar days</p>
+                {errors.dueDiligenceDays && <p className="mt-1 text-xs text-red-600 flex items-center gap-1"><Icon name="ExclamationCircleIcon" size={12} />{errors.dueDiligenceDays.message}</p>}
               </div>
             </div>
           </div>

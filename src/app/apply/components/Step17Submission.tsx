@@ -79,7 +79,7 @@ export default function Step17Submission({ data, onSubmit, onBack, isSubmitting,
           <ReviewRow label="Company" value={`${data.companyName}${data.companyType ? ` (${data.companyType})` : ''}`} />
           <ReviewRow label="Property Address" value={data.propertyAddress} />
           <ReviewRow label="Property Type" value={data.propertyType} />
-          <ReviewRow label="Closing Date" value={data.closingDate} />
+          <ReviewRow label="Due Diligence Period" value={data.dueDiligenceDays ? `${data.dueDiligenceDays} Days` : '—'} />
         </ReviewSection>
 
         <ReviewSection title="Documents" icon="DocumentArrowUpIcon">

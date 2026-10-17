@@ -123,6 +123,21 @@ export async function POST(request: Request) {
   const active_deal           = typeof rawBody.active_deal === 'boolean' ? rawBody.active_deal : null;
   const estimated_emd_amount  = typeof rawBody.estimated_emd_amount === 'number' ? rawBody.estimated_emd_amount : null;
   const target_closing_date   = sanitizeText(rawBody.target_closing_date, 20);
+
+  // due_diligence_days: optional during transition; when supplied must be an integer 1–999
+  let due_diligence_days: number | null = null;
+  const rawDd = rawBody.due_diligence_days;
+  if (rawDd !== undefined && rawDd !== null && rawDd !== '') {
+    const ddStr = typeof rawDd === 'number' ? String(rawDd) : typeof rawDd === 'string' ? rawDd.trim() : '';
+    const ddNum = /^\d{1,4}$/.test(ddStr) ? parseInt(ddStr, 10) : NaN;
+    if (!Number.isInteger(ddNum) || ddNum < 1 || ddNum > 999) {
+      return NextResponse.json(
+        { error: 'due_diligence_days must be a whole number between 1 and 999' },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+    due_diligence_days = ddNum;
+  }
   const landing_page          = sanitizeUrl(rawBody.landing_page);
   const referrer              = sanitizeUrl(rawBody.referrer);
   const utm_source            = sanitizeUtm(rawBody.utm_source);
@@ -279,6 +294,7 @@ export async function POST(request: Request) {
         inquiry_type: 'BPCON26 Promo Claim',
         estimated_emd_amount: estimated_emd_amount,
         target_closing_date: target_closing_date || null,
+        due_diligence_days: due_diligence_days,
         lead_source: BPCON26_LEAD_SOURCE,
         landing_page: landing_page || null,
         referrer: referrer || null,

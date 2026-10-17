@@ -24,7 +24,7 @@ export interface ApplicationFormData {
   propertyAddress: string;
   propertyType: string;
   purchasePrice: string;
-  closingDate: string;
+  dueDiligenceDays: string;
   // Step 1.4
   loiFile: File | null;
   loiFileName: string;
@@ -40,7 +40,7 @@ export interface ApplicationFormData {
 const INITIAL_DATA: ApplicationFormData = {
   firstName: '', lastName: '', email: '', phone: '', agreedToTerms: false,
   depositAmount: '', companyName: '', companyType: '', propertyAddress: '',
-  propertyType: '', purchasePrice: '', closingDate: '',
+  propertyType: '', purchasePrice: '', dueDiligenceDays: '',
   loiFile: null, loiFileName: '', loiFileUrl: '',
   psaFile: null, psaFileName: '', psaFileUrl: '',
   identityMethod: '', identityVerified: false,
@@ -100,7 +100,7 @@ export default function BorrowerApplicationForm() {
           propertyAddress: data.property_address || '',
           propertyType: data.property_type || '',
           purchasePrice: data.purchase_price ? String(data.purchase_price) : '',
-          closingDate: data.closing_date || '',
+          dueDiligenceDays: data.due_diligence_days ? String(data.due_diligence_days) : '',
           loiFile: null,
           loiFileName: data.loi_file_name || '',
           loiFileUrl: data.loi_file_url || '',
@@ -145,7 +145,7 @@ export default function BorrowerApplicationForm() {
     property_address: data.propertyAddress || null,
     property_type: data.propertyType || null,
     purchase_price: data.purchasePrice ? parseFloat(data.purchasePrice) : null,
-    closing_date: data.closingDate || null,
+    due_diligence_days: data.dueDiligenceDays ? parseInt(data.dueDiligenceDays, 10) : null,
     loi_file_url: data.loiFileUrl || null,
     loi_file_name: data.loiFileName || null,
     psa_file_url: data.psaFileUrl || null,
@@ -306,7 +306,7 @@ export default function BorrowerApplicationForm() {
               propertyAddress: formData.propertyAddress,
               depositAmount: formData.depositAmount,
               purchasePrice: formData.purchasePrice,
-              closingDate: formData.closingDate,
+              closingDate: '',
             },
           };
           const adminPayload = {
@@ -323,7 +323,7 @@ export default function BorrowerApplicationForm() {
               propertyType: formData.propertyType,
               depositAmount: formData.depositAmount,
               purchasePrice: formData.purchasePrice,
-              closingDate: formData.closingDate,
+              closingDate: '',
             },
           };
           await Promise.allSettled([

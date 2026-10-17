@@ -72,7 +72,7 @@ interface FormState {
   propertyType: string;
   depositAmount: string;
   purchasePrice: string;
-  closingDate: string;
+  dueDiligenceDays: string;
   adminNotes: string;
 }
 
@@ -92,7 +92,7 @@ const INITIAL_FORM: FormState = {
   propertyType: '',
   depositAmount: '',
   purchasePrice: '',
-  closingDate: '',
+  dueDiligenceDays: '',
   adminNotes: '',
 };
 
@@ -249,7 +249,13 @@ export default function CreateDealModal({
     if (!form.propertyType) newErrors.propertyType = 'Property type is required';
     if (!form.depositAmount) newErrors.depositAmount = 'EMD amount is required';
     if (!form.purchasePrice) newErrors.purchasePrice = 'Purchase price is required';
-    if (!form.closingDate) newErrors.closingDate = 'Closing date is required';
+    {
+      const dd = form.dueDiligenceDays.trim();
+      const ddNum = /^\d+$/.test(dd) ? parseInt(dd, 10) : NaN;
+      if (!(ddNum >= 1 && ddNum <= 999)) {
+        newErrors.dueDiligenceDays = 'Enter a due diligence period between 1 and 999 days.';
+      }
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -278,7 +284,7 @@ export default function CreateDealModal({
         property_type: form.propertyType,
         deposit_amount: parseNumber(form.depositAmount),
         purchase_price: parseNumber(form.purchasePrice),
-        closing_date: form.closingDate,
+        due_diligence_days: parseInt(form.dueDiligenceDays.trim(), 10),
         app_status: 'submitted',
         agreed_to_terms: true,
         identity_verified: false,
@@ -607,10 +613,24 @@ export default function CreateDealModal({
                     {errors.propertyType && <p className="mt-1 text-xs text-red-600 flex items-center gap-1"><Icon name="ExclamationCircleIcon" size={12} />{errors.propertyType}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Target Closing Date <span className="text-red-500">*</span></label>
-                    <input type="date" value={form.closingDate} onChange={e => set('closingDate', e.target.value)}
-                      className={`w-full px-3.5 py-2.5 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900 transition-all ${errors.closingDate ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
-                    {errors.closingDate && <p className="mt-1 text-xs text-red-600 flex items-center gap-1"><Icon name="ExclamationCircleIcon" size={12} />{errors.closingDate}</p>}
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Due Diligence Period (days) <span className="text-red-500">*</span>
+                      <span
+                        className="inline-flex align-middle ml-1.5 text-gray-400 hover:text-eb-green-800 cursor-help"
+                        title="We only support refundable deposits during due diligence period."
+                        aria-label="We only support refundable deposits during due diligence period."
+                        tabIndex={0}
+                        role="img"
+                      >
+                        <Icon name="InformationCircleIcon" size={15} />
+                      </span>
+                    </label>
+                    <input type="number" min={1} max={999} step={1} inputMode="numeric" placeholder="e.g. 30"
+                      title="We only support refundable deposits during due diligence period."
+                      value={form.dueDiligenceDays} onChange={e => set('dueDiligenceDays', e.target.value)}
+                      className={`w-full sm:w-40 px-3.5 py-2.5 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900 transition-all ${errors.dueDiligenceDays ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                    <p className="mt-1 text-xs text-gray-500">Calendar days</p>
+                    {errors.dueDiligenceDays && <p className="mt-1 text-xs text-red-600 flex items-center gap-1"><Icon name="ExclamationCircleIcon" size={12} />{errors.dueDiligenceDays}</p>}
                   </div>
                 </div>
               </div>
