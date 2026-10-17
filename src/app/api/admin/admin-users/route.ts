@@ -18,10 +18,12 @@ export async function GET() {
   }
 
   // 2. Validate server environment
-  let supabaseUrl: string | undefined;
-  let serviceRoleKey: string | undefined;
+  let supabaseUrl: string;
+  let serviceRoleKey: string;
   try {
-    ({ supabaseUrl, serviceRoleKey } = validateServerEnv());
+    const env = validateServerEnv();
+    supabaseUrl = env.supabaseUrl;
+    serviceRoleKey = env.serviceRoleKey;
   } catch {
     return NextResponse.json(
       { error: 'Required server environment variable is not configured.' },
@@ -30,7 +32,7 @@ export async function GET() {
   }
 
   // 3. Create service-role client
-  const adminClient = createServiceRoleClient(supabaseUrl!, serviceRoleKey!);
+  const adminClient = createServiceRoleClient(supabaseUrl, serviceRoleKey);
 
   // 4. Paginate auth.admin.listUsers() and filter server-side to Admin users only
   try {
