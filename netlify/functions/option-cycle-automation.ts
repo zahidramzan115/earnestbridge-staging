@@ -45,6 +45,7 @@ function isServiceRolePlaceholder(value: string): boolean {
 
 // ── Netlify Scheduled Function handler ───────────────────────────────────────
 
+// Redeploy marker: refresh Netlify Functions environment configuration.
 export default async function handler(req: Request, context: Context) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
