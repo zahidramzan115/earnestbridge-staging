@@ -3,6 +3,8 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Icon from '@/components/ui/AppIcon';
+import { useAuth } from '@/contexts/AuthContext';
+import PortalAccessDialog from '@/components/PortalAccessDialog';
 
 type AppStatus = 'application' | 'under_review' | 'approved' | 'in_progress' | 'funded' | 'closed' | 'rejected';
 
@@ -168,6 +170,8 @@ function aggregateByUser(apps: BorrowerApplication[], authUsers: AuthUserRecord[
 export default function AdminBorrowersContent() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const { isSuperAdmin } = useAuth();
+  const canManageAccess = isSuperAdmin();
 
   const [applications, setApplications] = useState<BorrowerApplication[]>([]);
   const [authUsers, setAuthUsers] = useState<AuthUserRecord[]>([]);
@@ -175,6 +179,7 @@ export default function AdminBorrowersContent() {
   const [searchQuery, setSearchQuery] = useState('');
   // Map of user_id -> is_disabled
   const [disabledMap, setDisabledMap] = useState<Record<string, boolean>>({});
+  const [accessDialog, setAccessDialog] = useState<{ userId: string; name: string; mode: 'revoke' | 'reinstate' } | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const fetchBorrowers = useCallback(async () => {
@@ -219,31 +224,14 @@ export default function AdminBorrowersContent() {
     fetchBorrowers();
   }, [fetchBorrowers]);
 
+  // Account-wide portal access changes go through the SuperAdmin-only server API
+  // (PortalAccessDialog -> POST /api/admin/portal-access/[userId]).
   const handleToggleDisable = useCallback(
-    async (e: React.MouseEvent, userId: string, currentlyDisabled: boolean) => {
+    (e: React.MouseEvent, userId: string, currentlyDisabled: boolean, name: string) => {
       e.stopPropagation();
-      setTogglingId(userId);
-      try {
-        const { error } = await supabase
-          .from('borrower_access')
-          .upsert(
-            {
-              user_id: userId,
-              is_disabled: !currentlyDisabled,
-              disabled_at: !currentlyDisabled ? new Date().toISOString() : null,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'user_id' }
-          );
-        if (error) throw error;
-        setDisabledMap((prev) => ({ ...prev, [userId]: !currentlyDisabled }));
-      } catch (err) {
-        console.error('Failed to toggle borrower access:', err);
-      } finally {
-        setTogglingId(null);
-      }
+      setAccessDialog({ userId, name, mode: currentlyDisabled ? 'reinstate' : 'revoke' });
     },
-    [supabase]
+    []
   );
 
   const userRows = useMemo(() => aggregateByUser(applications, authUsers), [applications, authUsers]);
@@ -395,7 +383,7 @@ export default function AdminBorrowersContent() {
                               </p>
                               {isDisabled && (
                                 <span className="text-[10px] font-display font-600 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200 flex-shrink-0">
-                                  Disabled
+                                  Portal Access Disabled
                                 </span>
                               )}
                             </div>
@@ -463,22 +451,24 @@ export default function AdminBorrowersContent() {
                             View
                             <Icon name="ChevronRightIcon" size={11} className="opacity-70" />
                           </button>
+                          {canManageAccess && (
                           <button
-                            onClick={(e) => handleToggleDisable(e, u.user_id, isDisabled)}
+                            onClick={(e) => handleToggleDisable(e, u.user_id, isDisabled, `${u.first_name} ${u.last_name}`)}
                             disabled={isToggling}
                             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                               isDisabled
                                 ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200' :'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
                             }`}
-                            title={isDisabled ? 'Enable borrower access' : 'Disable borrower access'}
+                            title={isDisabled ? 'Reinstate Portal Access' : 'Revoke Portal Access'}
                           >
                             {isToggling ? (
                               <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
                             ) : (
                               <Icon name={isDisabled ? 'LockOpenIcon' : 'LockClosedIcon'} size={13} />
                             )}
-                            {isDisabled ? 'Enable' : 'Disable'}
+                            {isDisabled ? 'Reinstate' : 'Revoke'}
                           </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -513,7 +503,7 @@ export default function AdminBorrowersContent() {
                         </p>
                         {isDisabled && (
                           <span className="text-[10px] font-display font-600 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200 flex-shrink-0">
-                            Disabled
+                            Portal Access Disabled
                           </span>
                         )}
                       </div>
@@ -569,8 +559,9 @@ export default function AdminBorrowersContent() {
                       <Icon name="EyeIcon" size={13} />
                       View Details
                     </button>
+                    {canManageAccess && (
                     <button
-                      onClick={(e) => handleToggleDisable(e, u.user_id, isDisabled)}
+                      onClick={(e) => handleToggleDisable(e, u.user_id, isDisabled, `${u.first_name} ${u.last_name}`)}
                       disabled={isToggling}
                       className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                         isDisabled
@@ -582,14 +573,28 @@ export default function AdminBorrowersContent() {
                       ) : (
                         <Icon name={isDisabled ? 'LockOpenIcon' : 'LockClosedIcon'} size={13} />
                       )}
-                      {isDisabled ? 'Enable' : 'Disable'}
+                      {isDisabled ? 'Reinstate Access' : 'Revoke Access'}
                     </button>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
         </>
+      )}
+
+      {accessDialog && (
+        <PortalAccessDialog
+          mode={accessDialog.mode}
+          userId={accessDialog.userId}
+          displayName={accessDialog.name}
+          onClose={() => setAccessDialog(null)}
+          onSuccess={(disabled) => {
+            setDisabledMap((prev) => ({ ...prev, [accessDialog.userId]: disabled }));
+            setAccessDialog(null);
+          }}
+        />
       )}
 
       {/* Footer summary */}

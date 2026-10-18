@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
-import AccessDeniedScreen from './AccessDeniedScreen';
+import PortalAccessDisabledScreen from './PortalAccessDisabledScreen';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -63,7 +63,7 @@ export default function AppLayout({ children, activePath }: AppLayoutProps) {
 
   // Show restricted screen if disabled
   if (isDisabled) {
-    return <AccessDeniedScreen />;
+    return <PortalAccessDisabledScreen />;
   }
 
   return (

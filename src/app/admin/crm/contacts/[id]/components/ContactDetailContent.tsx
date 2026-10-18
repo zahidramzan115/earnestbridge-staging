@@ -119,10 +119,10 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const PORTAL_CONFIG: Record<string, { label: string; color: string; icon: string; badgeColor: string }> = {
-  none:     { label: 'No Portal Account',       color: 'bg-gray-100 text-gray-500 border-gray-200',    icon: 'UserIcon',         badgeColor: 'bg-gray-100 text-gray-500 border-gray-200' },
-  pending:  { label: 'Portal Access Pending',   color: 'bg-amber-100 text-amber-700 border-amber-200', icon: 'ClockIcon',        badgeColor: 'bg-amber-100 text-amber-700 border-amber-200' },
-  approved: { label: 'Portal Account Active',   color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: 'CheckCircleIcon', badgeColor: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  rejected: { label: 'Portal Access Rejected',  color: 'bg-red-100 text-red-700 border-red-200',       icon: 'XCircleIcon',      badgeColor: 'bg-red-100 text-red-700 border-red-200' },
+  none:     { label: 'No Portal Link',          color: 'bg-gray-100 text-gray-500 border-gray-200',    icon: 'UserIcon',         badgeColor: 'bg-gray-100 text-gray-500 border-gray-200' },
+  pending:  { label: 'Portal Link Pending',     color: 'bg-amber-100 text-amber-700 border-amber-200', icon: 'ClockIcon',        badgeColor: 'bg-amber-100 text-amber-700 border-amber-200' },
+  approved: { label: 'Portal Link Approved',    color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: 'CheckCircleIcon', badgeColor: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  rejected: { label: 'Portal Link Rejected',    color: 'bg-red-100 text-red-700 border-red-200',       icon: 'XCircleIcon',      badgeColor: 'bg-red-100 text-red-700 border-red-200' },
 };
 
 const DEAL_STATUS_COLORS: Record<string, string> = {
@@ -300,6 +300,7 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
   const router = useRouter();
   const { isSuperAdmin } = useAuth();
   const canPurge = isSuperAdmin();
+  const canManageAccess = canPurge;
 
   // Purge state (SuperAdmin only; server is the authoritative boundary)
   const [showPurge, setShowPurge] = useState(false);
@@ -309,6 +310,17 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
   const [purgeError, setPurgeError] = useState<string | null>(null);
   const purgeLockRef = useRef(false);
   const [purgeToast, setPurgeToast] = useState<string | null>(null);
+
+  // Account-wide Client Portal access (borrower_access) — SuperAdmin mutates via server API
+  const [accountDisabled, setAccountDisabled] = useState<boolean | null>(null);
+  const [showRevoke, setShowRevoke] = useState(false);
+  const [revokeReason, setRevokeReason] = useState('');
+  const [revokeConfirmText, setRevokeConfirmText] = useState('');
+  const [showReinstate, setShowReinstate] = useState(false);
+  const [reinstateReason, setReinstateReason] = useState('');
+  const [accessSubmitting, setAccessSubmitting] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const accessLockRef = useRef(false);
 
   const [contact, setContact] = useState<Contact | null>(null);  const [activities, setActivities] = useState<Activity[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -419,6 +431,19 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
     setActivities((results[0].data as Activity[]) || []);
     setTasks((results[1].data as Task[]) || []);
     setSubmissions((results[2].data as Submission[]) || []);
+
+    // Account-wide portal access status (read-only for all Admins)
+    const portalUserId = (contactData as unknown as Contact)?.portal_user_id;
+    if (portalUserId) {
+      const { data: accessRow, error: accessErr } = await supabase
+        .from('borrower_access')
+        .select('is_disabled')
+        .eq('user_id', portalUserId)
+        .maybeSingle();
+      setAccountDisabled(accessErr ? null : accessRow?.is_disabled === true);
+    } else {
+      setAccountDisabled(null);
+    }
     setLoading(false);
   }, [contactId, supabase, router]);
 
@@ -696,6 +721,62 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
     setCallLogged(true);
     await load();
     setLoggingCall(false);
+  };
+
+  // ── Account Portal Access Handlers (SuperAdmin, via server API) ───────────
+
+  const closeRevokeDialog = () => {
+    if (accessLockRef.current) return;
+    setShowRevoke(false);
+    setRevokeReason('');
+    setRevokeConfirmText('');
+    setAccessError(null);
+  };
+
+  const closeReinstateDialog = () => {
+    if (accessLockRef.current) return;
+    setShowReinstate(false);
+    setReinstateReason('');
+    setAccessError(null);
+  };
+
+  const submitAccessChange = async (disabled: boolean, reason: string) => {
+    if (accessLockRef.current) return;
+    if (!contact?.portal_user_id) return;
+    accessLockRef.current = true;
+    setAccessSubmitting(true);
+    setAccessError(null);
+    try {
+      const res = await fetch(`/api/admin/portal-access/${contact.portal_user_id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(disabled ? { disabled: true, reason } : { disabled: false, ...(reason ? { reason } : {}) }),
+      });
+      if (res.ok) {
+        setShowRevoke(false);
+        setShowReinstate(false);
+        setRevokeReason('');
+        setRevokeConfirmText('');
+        setReinstateReason('');
+        setAccountDisabled(disabled);
+        setPurgeToast(disabled ? 'Client Portal access revoked.' : 'Client Portal access reinstated.');
+        setTimeout(() => setPurgeToast(null), 4000);
+      } else if (res.status === 401) {
+        setAccessError('Your session has expired. Please sign in again.');
+      } else if (res.status === 403) {
+        setAccessError('Only a SuperAdmin can change Client Portal access.');
+      } else if (res.status === 400) {
+        const j = await res.json().catch(() => null);
+        setAccessError(j?.error || 'Invalid request.');
+      } else {
+        setAccessError('The change could not be confirmed. Please refresh the page to check the current status before retrying.');
+      }
+    } catch {
+      setAccessError('A network error occurred. The change may or may not have completed. Please refresh the page before retrying.');
+    } finally {
+      accessLockRef.current = false;
+      setAccessSubmitting(false);
+    }
   };
 
   // ── Purge Handlers (SuperAdmin) ───────────────────────────────────────────
@@ -1407,6 +1488,7 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
                 <div className="flex items-center gap-3">
                   <Icon name={portalCfg.icon as Parameters<typeof Icon>[0]['name']} size={20} />
                   <div>
+                    <p className="text-[10px] font-600 uppercase tracking-wider opacity-70">Portal Link Status</p>
                     <p className="font-700 text-sm">{portalCfg.label}</p>
                     {contact.portal_linked_at && (
                       <p className="text-xs mt-0.5 opacity-70">Linked: {formatDateTime(contact.portal_linked_at)}</p>
@@ -1416,18 +1498,61 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
                     )}
                   </div>
                 </div>
+                <p className="text-xs mt-2 opacity-70">
+                  Whether this CRM Contact is approved as a linked portal Contact. This is not the account-wide Client Portal access status.
+                </p>
               </div>
+
+              {contact.portal_user_id && (
+                <div className="p-4 rounded-xl border border-gray-200 bg-white">
+                  <p className="text-[10px] font-600 uppercase tracking-wider text-gray-500">Account Portal Access</p>
+                  <div className="flex flex-wrap items-center justify-between gap-3 mt-1">
+                    {accountDisabled === null ? (
+                      <p className="text-sm text-gray-500">Status unavailable</p>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-600 border ${
+                          accountDisabled
+                            ? 'bg-red-100 text-red-700 border-red-200' :'bg-emerald-100 text-emerald-700 border-emerald-200'
+                        }`}
+                      >
+                        <Icon name={accountDisabled ? 'LockClosedIcon' : 'CheckCircleIcon'} size={11} />
+                        {accountDisabled ? 'Portal Access Disabled' : 'Portal Access Active'}
+                      </span>
+                    )}
+                    {canManageAccess && accountDisabled === false && (
+                      <button
+                        onClick={() => { setAccessError(null); setShowRevoke(true); }}
+                        className="px-3 py-1.5 text-xs font-600 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                      >
+                        Revoke Portal Access
+                      </button>
+                    )}
+                    {canManageAccess && accountDisabled === true && (
+                      <button
+                        onClick={() => { setAccessError(null); setShowReinstate(true); }}
+                        className="px-3 py-1.5 text-xs font-600 text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+                      >
+                        Reinstate Portal Access
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Account-wide Client Portal access for this client&apos;s login. Independent of the portal link status above.
+                  </p>
+                </div>
+              )}
 
               {contact.portal_link_status === 'pending' && (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                  <p className="text-sm font-600 text-amber-800 mb-1">Portal Access Pending Review</p>
+                  <p className="text-sm font-600 text-amber-800 mb-1">Portal Link Pending Review</p>
                   <p className="text-xs text-amber-700 mb-3">
                     A portal account was registered using <strong>{contact.primary_email}</strong> and matches this CRM Contact.
-                    Review and approve or reject portal access.
+                    Review and approve or reject the portal link.
                   </p>
                   <div className="flex gap-2">
                     <button onClick={() => handlePortalAction('approved')} className="px-4 py-2 bg-emerald-600 text-white text-sm font-600 rounded-lg hover:bg-emerald-700 transition-colors">
-                      Approve Portal Access
+                      Approve Portal Link
                     </button>
                     <button onClick={() => handlePortalAction('rejected')} className="px-4 py-2 bg-red-600 text-white text-sm font-600 rounded-lg hover:bg-red-700 transition-colors">
                       Reject / Unlink
@@ -1439,14 +1564,14 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
               {contact.portal_link_status === 'approved' && (
                 <div className="space-y-3">
                   <p className="text-sm text-gray-600">
-                    This contact has an active portal account. They can view all deals where their Contact record is explicitly associated.
+                    This contact is linked to a portal account. They can view all deals where their Contact record is explicitly associated.
                   </p>
                   <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
                     <p className="text-xs text-gray-500 font-600 uppercase tracking-wider mb-1">Portal Email</p>
                     <p className="text-sm text-gray-800">{contact.primary_email}</p>
                   </div>
                   <button onClick={() => handlePortalAction('rejected')} className="text-xs text-red-600 hover:underline">
-                    Revoke portal access
+                    Reject portal link
                   </button>
                 </div>
               )}
@@ -1754,6 +1879,127 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
           </div>
         );
       })()}
+
+      {/* Revoke Portal Access Modal (SuperAdmin) */}
+      {canManageAccess && showRevoke && (() => {
+        const canSubmit = !accessSubmitting && revokeReason.trim().length > 0 && revokeConfirmText === 'REVOKE';
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={closeRevokeDialog} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-red-100">
+                  <Icon name="ExclamationTriangleIcon" size={20} className="text-red-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-display font-700 text-gray-900 text-base">Revoke Portal Access</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {`Contact: ${contact.first_name} ${contact.last_name}. `}
+                    This disables this client&apos;s entire Client Portal account. Their CRM Contact, Deals, invoices and history remain stored.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label htmlFor="portal-revoke-reason" className="block text-xs font-600 text-gray-700 mb-1">Reason (required)</label>
+                  <textarea
+                    id="portal-revoke-reason"
+                    value={revokeReason}
+                    onChange={e => setRevokeReason(e.target.value)}
+                    maxLength={1000}
+                    rows={3}
+                    disabled={accessSubmitting}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="portal-revoke-confirm" className="block text-xs font-600 text-gray-700 mb-1">
+                    Type <span className="font-mono font-700">REVOKE</span> to confirm
+                  </label>
+                  <input
+                    id="portal-revoke-confirm"
+                    type="text"
+                    value={revokeConfirmText}
+                    onChange={e => setRevokeConfirmText(e.target.value)}
+                    disabled={accessSubmitting}
+                    autoComplete="off"
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  />
+                </div>
+                {accessError && <p className="text-sm text-red-600" role="alert">{accessError}</p>}
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={closeRevokeDialog}
+                  disabled={accessSubmitting}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => submitAccessChange(true, revokeReason.trim())}
+                  disabled={!canSubmit}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {accessSubmitting ? 'Revoking…' : 'Revoke Portal Access'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Reinstate Portal Access Modal (SuperAdmin) */}
+      {canManageAccess && showReinstate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={closeReinstateDialog} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-100">
+                <Icon name="LockOpenIcon" size={20} className="text-emerald-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-display font-700 text-gray-900 text-base">Reinstate Portal Access</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {`Contact: ${contact.first_name} ${contact.last_name}. `}
+                  This restores account-wide Client Portal access. It does not restore purged Deals or Contacts.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label htmlFor="portal-reinstate-reason" className="block text-xs font-600 text-gray-700 mb-1">Note (optional)</label>
+                <textarea
+                  id="portal-reinstate-reason"
+                  value={reinstateReason}
+                  onChange={e => setReinstateReason(e.target.value)}
+                  maxLength={1000}
+                  rows={2}
+                  disabled={accessSubmitting}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                />
+              </div>
+              {accessError && <p className="text-sm text-red-600" role="alert">{accessError}</p>}
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={closeReinstateDialog}
+                disabled={accessSubmitting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => submitAccessChange(false, reinstateReason.trim())}
+                disabled={accessSubmitting}
+                className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {accessSubmitting ? 'Reinstating…' : 'Reinstate Portal Access'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Merge Modal */}
       {showMerge && (

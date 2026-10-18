@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
+import { assertPortalAccess } from '@/lib/server/portalAccess';
 
 // ============================================================
 // Document Revision API
@@ -210,6 +211,12 @@ export async function POST(req: NextRequest) {
   const authedUser = await getAuthedUser();
   if (!authedUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Account-wide portal access guard for Client callers
+  if (!authedUser.isAdmin) {
+    const portalBlock = await assertPortalAccess(authedUser.id);
+    if (portalBlock) return portalBlock;
   }
 
   try {
@@ -932,6 +939,12 @@ export async function GET(req: NextRequest) {
   const authedUser = await getAuthedUser();
   if (!authedUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Account-wide portal access guard for Client callers
+  if (!authedUser.isAdmin) {
+    const portalBlock = await assertPortalAccess(authedUser.id);
+    if (portalBlock) return portalBlock;
   }
 
   try {

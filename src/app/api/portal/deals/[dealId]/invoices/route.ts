@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
+import { assertPortalAccess } from '@/lib/server/portalAccess';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -142,6 +143,10 @@ export async function GET(
       { status: 401, headers: NO_STORE_HEADERS }
     );
   }
+
+  // Account-wide portal access guard (before resource-specific authorization)
+  const portalBlock = await assertPortalAccess(user.id);
+  if (portalBlock) return portalBlock;
 
   // User ID is derived ONLY from the authenticated session.
   // It is never accepted from the URL, query params, body, or headers.

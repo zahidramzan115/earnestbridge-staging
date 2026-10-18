@@ -4,6 +4,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { getOptionDeadlineCutoff } from '@/app/api/admin/option-cycles/route';
+import { assertPortalAccess } from '@/lib/server/portalAccess';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -182,6 +183,10 @@ export async function GET(
         { status: 401, headers: NO_STORE_HEADERS }
       );
     }
+
+    // ── Portal access guard (account-wide) ──────────────────────────────────
+    const portalBlock = await assertPortalAccess(user.id);
+    if (portalBlock) return portalBlock;
 
     // ── Step 2: Validate dealId ─────────────────────────────────────────────
     const { dealId } = await params;

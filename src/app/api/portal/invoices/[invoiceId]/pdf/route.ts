@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
+import { assertPortalAccess } from '@/lib/server/portalAccess';
 
 // ============================================================
 // Portal Invoice PDF Route
@@ -134,6 +135,10 @@ export async function GET(
         { status: 401, headers: NO_STORE_HEADERS }
       );
     }
+
+    // Account-wide portal access guard (before resource-specific authorization)
+    const portalBlock = await assertPortalAccess(user.id);
+    if (portalBlock) return portalBlock;
 
     // Authenticated user ID — server-derived only
     const authenticatedUserId = user.id;

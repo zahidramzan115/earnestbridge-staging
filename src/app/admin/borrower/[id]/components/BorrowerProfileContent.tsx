@@ -3,6 +3,8 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Icon from '@/components/ui/AppIcon';
+import { useAuth } from '@/contexts/AuthContext';
+import PortalAccessDialog from '@/components/PortalAccessDialog';
 
 type AppStatus =
   | 'draft' | 'submitted' | 'under_review' | 'approved' | 'rejected' |'funded' | 'closed' | 'conditionally_approved' | 'in_review' | 'expired';
@@ -139,7 +141,9 @@ const BorrowerProfileContent: React.FC = () => {
   const [authUser, setAuthUser] = useState<{ id: string; email: string; created_at: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDisabled, setIsDisabled] = useState(false);
-  const [togglingAccess, setTogglingAccess] = useState(false);
+  const [accessDialogMode, setAccessDialogMode] = useState<'revoke' | 'reinstate' | null>(null);
+  const { isSuperAdmin } = useAuth();
+  const canManageAccess = isSuperAdmin();
   const [activeTab, setActiveTab] = useState<'applications' | 'deals'>('applications');
 
   const fetchData = useCallback(async () => {
@@ -193,28 +197,11 @@ const BorrowerProfileContent: React.FC = () => {
     fetchData();
   }, [fetchData]);
 
-  const handleToggleAccess = useCallback(async () => {
-    setTogglingAccess(true);
-    try {
-      const { error } = await supabase
-        .from('borrower_access')
-        .upsert(
-          {
-            user_id: userId,
-            is_disabled: !isDisabled,
-            disabled_at: !isDisabled ? new Date().toISOString() : null,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id' }
-        );
-      if (error) throw error;
-      setIsDisabled((v) => !v);
-    } catch (err) {
-      console.error('Failed to toggle access:', err);
-    } finally {
-      setTogglingAccess(false);
-    }
-  }, [supabase, userId, isDisabled]);
+  // Account-wide portal access changes go through the SuperAdmin-only server API
+  // (PortalAccessDialog -> POST /api/admin/portal-access/[userId]).
+  const handleToggleAccess = useCallback(() => {
+    setAccessDialogMode(isDisabled ? 'reinstate' : 'revoke');
+  }, [isDisabled]);
 
   const applications = useMemo(() => allApps.filter((a) => APPLICATION_STATUSES.includes(a.app_status)), [allApps]);
   const deals = useMemo(() => allApps.filter((a) => DEAL_STATUSES.includes(a.app_status)), [allApps]);
@@ -304,7 +291,13 @@ const BorrowerProfileContent: React.FC = () => {
               {isDisabled && (
                 <span className="flex items-center gap-1 text-[11px] text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
                   <Icon name="LockClosedIcon" size={11} />
-                  Access Disabled
+                  Portal Access Disabled
+                </span>
+              )}
+              {!isDisabled && !isDemoId && (
+                <span className="flex items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                  <Icon name="CheckCircleIcon" size={11} />
+                  Portal Access Active
                 </span>
               )}
             </div>
@@ -327,21 +320,18 @@ const BorrowerProfileContent: React.FC = () => {
                 Email Borrower
               </a>
             )}
+            {canManageAccess && !isDemoId && (
             <button
               onClick={handleToggleAccess}
-              disabled={togglingAccess}
               className={`flex items-center gap-1.5 px-3 py-2 text-xs font-display font-600 rounded-xl border transition-all disabled:opacity-50 ${
                 isDisabled
                   ? 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100' : 'text-red-700 bg-red-50 border-red-200 hover:bg-red-100'
               }`}
             >
-              {togglingAccess ? (
-                <Icon name="ArrowPathIcon" size={13} className="animate-spin" />
-              ) : (
-                <Icon name={isDisabled ? 'LockOpenIcon' : 'LockClosedIcon'} size={13} />
-              )}
-              {isDisabled ? 'Enable Access' : 'Disable Access'}
+              <Icon name={isDisabled ? 'LockOpenIcon' : 'LockClosedIcon'} size={13} />
+              {isDisabled ? 'Reinstate Portal Access' : 'Revoke Portal Access'}
             </button>
+            )}
           </div>
         </div>
 
@@ -458,6 +448,19 @@ const BorrowerProfileContent: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {accessDialogMode && canManageAccess && (
+        <PortalAccessDialog
+          mode={accessDialogMode}
+          userId={userId}
+          displayName={`${displayFirstName} ${displayLastName}`.trim()}
+          onClose={() => setAccessDialogMode(null)}
+          onSuccess={(disabled) => {
+            setIsDisabled(disabled);
+            setAccessDialogMode(null);
+          }}
+        />
       )}
     </div>
   );

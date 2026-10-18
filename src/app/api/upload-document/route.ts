@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+import { assertPortalAccess } from '@/lib/server/portalAccess';
 
 // Server-side Supabase client with service role — bypasses all RLS
 function getServiceClient() {
@@ -13,20 +16,108 @@ function getServiceClient() {
   });
 }
 
+interface AuthedCaller {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+}
+
+// Authenticate the caller from the session cookie. Browser-supplied identity
+// (userId / uploaderEmail / uploadedByRole) is NEVER trusted.
+async function getAuthedCaller(): Promise<AuthedCaller | null> {
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          );
+        },
+      },
+    }
+  );
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email ?? '',
+    isAdmin: user.app_metadata?.role === 'admin',
+  };
+}
+
+// Is the (active) application owned by the user, or linked to the user through
+// an approved portal Contact (crm_deal_contacts)?
+async function clientCanAccessApplication(
+  supabase: ReturnType<typeof getServiceClient>,
+  applicationId: string,
+  userId: string
+): Promise<boolean> {
+  const { data: owned } = await supabase
+    .from('borrower_applications')
+    .select('id')
+    .eq('id', applicationId)
+    .eq('user_id', userId)
+    .is('purged_at', null)
+    .maybeSingle();
+  if (owned) return true;
+
+  const { data: contacts } = await supabase
+    .from('crm_contacts')
+    .select('id')
+    .eq('portal_user_id', userId)
+    .eq('portal_link_status', 'approved');
+  const contactIds = (contacts || []).map((c: { id: string }) => c.id);
+  if (contactIds.length === 0) return false;
+
+  const { data: link } = await supabase
+    .from('crm_deal_contacts')
+    .select('deal_id')
+    .eq('deal_id', applicationId)
+    .in('contact_id', contactIds)
+    .limit(1)
+    .maybeSingle();
+  if (!link) return false;
+
+  const { data: active } = await supabase
+    .from('borrower_applications')
+    .select('id')
+    .eq('id', applicationId)
+    .is('purged_at', null)
+    .maybeSingle();
+  return !!active;
+}
+
 export async function POST(req: NextRequest) {
   try {
+    // ── Authenticate: real session required ──────────────────────────────
+    const caller = await getAuthedCaller();
+    if (!caller) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Account-wide portal access guard for Client callers
+    if (!caller.isAdmin) {
+      const portalBlock = await assertPortalAccess(caller.id);
+      if (portalBlock) return portalBlock;
+    }
+
     const formData = await req.formData();
 
     const file = formData.get('file') as File | null;
     const applicationId = formData.get('applicationId') as string | null;
-    const userId = formData.get('userId') as string | null;
     const documentName = formData.get('documentName') as string | null;
-    const uploadedByRole = (formData.get('uploadedByRole') as string) || 'borrower';
-    const uploaderEmail = formData.get('uploaderEmail') as string | null;
 
-    if (!file || !applicationId || !userId) {
+    if (!file || !applicationId) {
       return NextResponse.json(
-        { error: 'Missing required fields: file, applicationId, userId' },
+        { error: 'Missing required fields: file, applicationId' },
         { status: 400 }
       );
     }
@@ -61,7 +152,7 @@ export async function POST(req: NextRequest) {
     // enforce it explicitly with the same response as a nonexistent Deal.
     const { data: activeApp, error: activeAppError } = await supabase
       .from('borrower_applications')
-      .select('id')
+      .select('id, user_id')
       .eq('id', applicationId)
       .is('purged_at', null)
       .maybeSingle();
@@ -71,6 +162,24 @@ export async function POST(req: NextRequest) {
     if (!activeApp) {
       return NextResponse.json({ error: 'Deal not found.' }, { status: 404 });
     }
+
+    // ── Authorize + derive identity from the session (never from the form) ─
+    let userId: string;
+    let uploadedByRole: 'admin' | 'borrower';
+    if (caller.isAdmin) {
+      // Admin uploading on behalf of the Deal's owner
+      userId = activeApp.user_id as string;
+      uploadedByRole = 'admin';
+    } else {
+      const allowed = await clientCanAccessApplication(supabase, applicationId, caller.id);
+      if (!allowed) {
+        // Same response as a nonexistent Deal — do not disclose existence
+        return NextResponse.json({ error: 'Deal not found.' }, { status: 404 });
+      }
+      userId = caller.id;
+      uploadedByRole = 'borrower';
+    }
+    const uploaderEmail = caller.email || null;
 
     // Build storage path: userId/applicationId/timestamp.ext
     const ext = file.name.split('.').pop() ?? 'bin';
@@ -187,18 +296,27 @@ export async function POST(req: NextRequest) {
 // Also handle LOI/PSA uploads for the application form (borrower_documents table)
 export async function PUT(req: NextRequest) {
   try {
+    // ── Authenticate: real session required ──────────────────────────────
+    const caller = await getAuthedCaller();
+    if (!caller) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!caller.isAdmin) {
+      const portalBlock = await assertPortalAccess(caller.id);
+      if (portalBlock) return portalBlock;
+    }
+
     const formData = await req.formData();
 
     const file = formData.get('file') as File | null;
     const applicationId = formData.get('applicationId') as string | null;
-    const userId = formData.get('userId') as string | null;
     const documentName = formData.get('documentName') as string | null;
     const documentType = (formData.get('documentType') as string) || 'other';
     const category = (formData.get('category') as string) || 'legal';
 
-    if (!file || !userId) {
+    if (!file) {
       return NextResponse.json(
-        { error: 'Missing required fields: file, userId' },
+        { error: 'Missing required fields: file' },
         { status: 400 }
       );
     }
@@ -223,6 +341,32 @@ export async function PUT(req: NextRequest) {
     }
 
     const supabase = getServiceClient();
+
+    // ── Authorize + derive identity from the session (never from the form) ─
+    let userId: string = caller.id;
+    if (applicationId) {
+      const { data: activeApp, error: activeAppError } = await supabase
+        .from('borrower_applications')
+        .select('id, user_id')
+        .eq('id', applicationId)
+        .is('purged_at', null)
+        .maybeSingle();
+      if (activeAppError) {
+        return NextResponse.json({ error: 'Upload failed.' }, { status: 500 });
+      }
+      if (!activeApp) {
+        return NextResponse.json({ error: 'Deal not found.' }, { status: 404 });
+      }
+      if (caller.isAdmin) {
+        userId = activeApp.user_id as string;
+      } else {
+        const allowed = await clientCanAccessApplication(supabase, applicationId, caller.id);
+        if (!allowed) {
+          return NextResponse.json({ error: 'Deal not found.' }, { status: 404 });
+        }
+        userId = caller.id;
+      }
+    }
 
     const ext = file.name.split('.').pop() ?? 'bin';
     const folder = applicationId ? `${userId}/${applicationId}` : `${userId}/misc`;
@@ -298,7 +442,17 @@ export async function PUT(req: NextRequest) {
 // DELETE: Remove a document by ID (storage + DB)
 export async function DELETE(req: NextRequest) {
   try {
-    const { documentId, storagePath } = await req.json();
+    // ── Authenticate: real session required ──────────────────────────────
+    const caller = await getAuthedCaller();
+    if (!caller) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!caller.isAdmin) {
+      const portalBlock = await assertPortalAccess(caller.id);
+      if (portalBlock) return portalBlock;
+    }
+
+    const { documentId } = await req.json();
 
     if (!documentId) {
       return NextResponse.json({ error: 'Missing documentId' }, { status: 400 });
@@ -306,11 +460,31 @@ export async function DELETE(req: NextRequest) {
 
     const supabase = getServiceClient();
 
-    // Remove from storage if path provided
-    if (storagePath) {
+    // Load the document server-side — never trust a browser-supplied storagePath
+    const { data: doc, error: docError } = await supabase
+      .from('application_documents')
+      .select('id, application_id, storage_path')
+      .eq('id', documentId)
+      .maybeSingle();
+    if (docError) {
+      return NextResponse.json({ error: 'Delete failed.' }, { status: 500 });
+    }
+    if (!doc) {
+      return NextResponse.json({ error: 'Document not found.' }, { status: 404 });
+    }
+
+    if (!caller.isAdmin) {
+      const allowed = await clientCanAccessApplication(supabase, doc.application_id as string, caller.id);
+      if (!allowed) {
+        return NextResponse.json({ error: 'Document not found.' }, { status: 404 });
+      }
+    }
+
+    // Remove from storage using the server-loaded path
+    if (doc.storage_path) {
       const { error: storageError } = await supabase.storage
         .from('borrower-documents')
-        .remove([storagePath]);
+        .remove([doc.storage_path as string]);
       if (storageError) {
         console.error('[upload-document DELETE] Storage remove error:', storageError);
         // Non-fatal — continue to DB delete

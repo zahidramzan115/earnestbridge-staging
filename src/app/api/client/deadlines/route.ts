@@ -3,6 +3,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { getOptionDeadlineCutoff } from '@/app/api/admin/option-cycles/route';
+import { assertPortalAccess } from '@/lib/server/portalAccess';
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -121,6 +122,10 @@ export async function GET() {
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  // Account-wide portal access guard (before resource-specific authorization)
+  const portalBlock = await assertPortalAccess(user.id);
+  if (portalBlock) return portalBlock;
 
   const authenticatedUserId = user.id; // server-derived, never from browser
 
