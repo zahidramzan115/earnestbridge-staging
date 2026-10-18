@@ -5,6 +5,7 @@ import {
   findContactIdByNormalizedEmail,
   restorePurgedContactIfNeeded,
 } from '@/lib/server/crmContactMatch';
+import { assertPortalAccess } from '@/lib/server/portalAccess';
 
 /**
  * POST /api/admin/link-deal-crm-contact
@@ -59,6 +60,12 @@ export async function POST(req: NextRequest) {
         { status: 401 }
       );
     }
+
+    // ── 1b. Account-wide Client Portal access guard ────────────────────────
+    // Borrower-accessible despite the /api/admin path. A disabled Client must
+    // not restore a Contact or mutate any CRM link. Runs BEFORE any mutation.
+    const portalDenied = await assertPortalAccess(authedUser.id);
+    if (portalDenied) return portalDenied;
 
     // ── 2. Parse and validate the request body ─────────────────────────────
     let applicationId: string | undefined;

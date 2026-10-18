@@ -17,6 +17,8 @@ export default function AppLayout({ children, activePath }: AppLayoutProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isDisabled, setIsDisabled] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
+  const [accessCheckFailed, setAccessCheckFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const { user, loading } = useAuth();
   const router = useRouter();
 
@@ -34,20 +36,39 @@ export default function AppLayout({ children, activePath }: AppLayoutProps) {
       return;
     }
 
+    let cancelled = false;
+    setAccessChecked(false);
+    setAccessCheckFailed(false);
+
     const supabase = createClient();
-    supabase
-      .from('borrower_access')
-      .select('is_disabled')
-      .eq('user_id', user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setIsDisabled(data?.is_disabled === true);
-        setAccessChecked(true);
-      })
-      .catch(() => {
-        setAccessChecked(true);
-      });
-  }, [user]);
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('borrower_access')
+          .select('is_disabled')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) {
+          // FAIL CLOSED: an unverifiable access state must never render the portal.
+          setAccessCheckFailed(true);
+          setIsDisabled(false);
+        } else {
+          setIsDisabled(data?.is_disabled === true);
+        }
+      } catch {
+        if (cancelled) return;
+        setAccessCheckFailed(true);
+        setIsDisabled(false);
+      } finally {
+        if (!cancelled) setAccessChecked(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, retryNonce]);
 
   // Show spinner while auth is loading or access check is pending
   if (loading || !accessChecked) {
@@ -64,6 +85,29 @@ export default function AppLayout({ children, activePath }: AppLayoutProps) {
   // Show restricted screen if disabled
   if (isDisabled) {
     return <PortalAccessDisabledScreen />;
+  }
+
+  // Access could not be verified — fail closed with a neutral message
+  if (accessCheckFailed) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="max-w-md w-full text-center">
+          <h1 className="font-display font-700 text-2xl text-gray-900 mb-3">
+            Unable to verify portal access
+          </h1>
+          <p className="text-gray-500 text-sm leading-relaxed mb-8">
+            Unable to verify portal access. Please try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => setRetryNonce((n) => n + 1)}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-eb-green-900 text-white text-sm font-medium hover:bg-eb-green-800 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
