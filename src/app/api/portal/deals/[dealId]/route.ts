@@ -199,6 +199,7 @@ export async function GET(
       .from('borrower_applications')
       .select(DEAL_SELECT)
       .eq('id', dealId)
+      .is('purged_at', null)
       .maybeSingle();
 
     if (appError) {

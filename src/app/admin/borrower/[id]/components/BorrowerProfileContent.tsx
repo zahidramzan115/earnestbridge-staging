@@ -156,6 +156,7 @@ const BorrowerProfileContent: React.FC = () => {
           .from('borrower_applications')
           .select('id, user_id, first_name, last_name, email, phone, company_name, property_address, property_type, purchase_price, deposit_amount, due_diligence_days, app_status, submitted_at, created_at, identity_verified, days_to_funding')
           .eq('user_id', userId)
+          .is('purged_at', null)
           .order('created_at', { ascending: false }),
         supabase
           .from('borrower_access')

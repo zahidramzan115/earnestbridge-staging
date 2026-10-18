@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
       .from('borrower_applications')
       .select('id, user_id, email, primary_contact_id')
       .eq('id', applicationId)
+      .is('purged_at', null)
       .single();
 
     if (appError || !app) {

@@ -261,6 +261,27 @@ export async function GET(
       );
     }
 
+    // ── 6b. Parent Deal must be active (not purged) ────────────────────────
+    // Service role bypasses RLS; enforce purge visibility explicitly with the
+    // same 404 as a missing invoice.
+    const { data: activeDeal, error: activeDealError } = await supabase
+      .from('borrower_applications').select('id').eq('id', invoice.application_id).is('purged_at', null)
+      .maybeSingle();
+
+    if (activeDealError) {
+      return NextResponse.json(
+        { error: 'invoice_pdf_request_failed' },
+        { status: 500, headers: NO_STORE_HEADERS }
+      );
+    }
+
+    if (!activeDeal) {
+      return NextResponse.json(
+        { error: 'invoice_not_found' },
+        { status: 404, headers: NO_STORE_HEADERS }
+      );
+    }
+
     // ── 7. Portal-specific status check ───────────────────────────────────
     // Portal allows ONLY: open, partially_paid, paid.
     // void is intentionally excluded — portal clients must not access

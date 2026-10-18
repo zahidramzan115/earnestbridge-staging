@@ -261,6 +261,7 @@ export default function AdminContent() {
       const { data, error: fetchError } = await supabase.
       from('borrower_applications').
       select('id, user_id, first_name, last_name, email, phone, company_name, property_address, property_type, purchase_price, deposit_amount, due_diligence_days, app_status, submitted_at, created_at, identity_verified').
+      is('purged_at', null).
       order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
@@ -302,6 +303,7 @@ export default function AdminContent() {
         const { data: appsData } = await supabase.
         from('borrower_applications').
         select('id, first_name, last_name, email, property_address').
+        is('purged_at', null).
         in('id', appIds);
 
         if (appsData) {
@@ -311,7 +313,7 @@ export default function AdminContent() {
         }
       }
 
-      const enriched: RealBorrowerDoc[] = docsData.map((d: any) => {
+      const enriched: RealBorrowerDoc[] = docsData.filter((d: any) => !d.application_id || appMap[d.application_id]).map((d: any) => {
         const app = d.application_id ? appMap[d.application_id] : null;
         return {
           ...d,

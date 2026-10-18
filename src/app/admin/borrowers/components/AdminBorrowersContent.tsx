@@ -186,6 +186,7 @@ export default function AdminBorrowersContent() {
           .select(
             'id, user_id, first_name, last_name, email, phone, company_name, deposit_amount, app_status, created_at'
           )
+          .is('purged_at', null)
           .order('created_at', { ascending: false }),
         supabase
           .from('borrower_access')

@@ -422,6 +422,7 @@ export async function GET(request: NextRequest) {
     .from('borrower_applications')
     .select('id, emd_funded_cents, funded_date, credit_card_payment_enabled, deposit_amount')
     .eq('id', applicationId)
+    .is('purged_at', null)
     .single();
 
   if (appError || !app) {
@@ -515,6 +516,7 @@ export async function PATCH(request: NextRequest) {
     .from('borrower_applications')
     .select('id, user_id')
     .eq('id', application_id)
+    .is('purged_at', null)
     .single();
 
   if (fetchError || !existing) {

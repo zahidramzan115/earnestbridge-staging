@@ -57,6 +57,21 @@ export async function POST(req: NextRequest) {
 
     const supabase = getServiceClient();
 
+    // Parent Deal must be active (not purged). Service role bypasses RLS, so
+    // enforce it explicitly with the same response as a nonexistent Deal.
+    const { data: activeApp, error: activeAppError } = await supabase
+      .from('borrower_applications')
+      .select('id')
+      .eq('id', applicationId)
+      .is('purged_at', null)
+      .maybeSingle();
+    if (activeAppError) {
+      return NextResponse.json({ error: 'Upload failed.' }, { status: 500 });
+    }
+    if (!activeApp) {
+      return NextResponse.json({ error: 'Deal not found.' }, { status: 404 });
+    }
+
     // Build storage path: userId/applicationId/timestamp.ext
     const ext = file.name.split('.').pop() ?? 'bin';
     const storagePath = `${userId}/${applicationId}/${Date.now()}.${ext}`;

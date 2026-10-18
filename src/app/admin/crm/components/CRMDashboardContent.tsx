@@ -148,6 +148,7 @@ export default function CRMDashboardContent() {
       const { data: activeDeals } = await supabase
         .from('borrower_applications')
         .select('id')
+        .is('purged_at', null)
         .in('app_status', ['approved', 'in_progress', 'funded']);
 
       let activeDealContactCount = 0;

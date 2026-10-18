@@ -109,6 +109,7 @@ export default function AdminLayout({ children, activePath }: AdminLayoutProps) 
     supabase
       .from('borrower_applications')
       .select('*', { count: 'exact', head: true })
+      .is('purged_at', null)
       .eq('app_status', 'submitted')
       .then(({ count }) => {
         setSubmittedCount(count ?? 0);

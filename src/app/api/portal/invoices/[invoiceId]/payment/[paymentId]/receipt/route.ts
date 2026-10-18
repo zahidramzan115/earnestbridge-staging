@@ -229,6 +229,23 @@ export async function GET(
     }
     if (!dealContacts || dealContacts.length === 0) return notFound();
 
+    // ── 6b. Parent Deal must be active (not purged) ───────────────────────
+    // Service role bypasses RLS; enforce purge visibility explicitly with the
+    // same generic 404 as a missing resource.
+    const { data: activeDeal, error: activeDealError } = await supabase
+      .from('borrower_applications')
+      .select('id')
+      .eq('id', invoice.application_id)
+      .is('purged_at', null)
+      .maybeSingle();
+    if (activeDealError) {
+      return NextResponse.json(
+        { error: 'receipt_request_failed' },
+        { status: 500, headers: NO_STORE_HEADERS }
+      );
+    }
+    if (!activeDeal) return notFound();
+
     // ── 7. Invoice status eligibility ─────────────────────────────────────
     // Deterministic: ineligible status (draft/issuing/void) → generic 404.
     if (!PORTAL_RECEIPT_INVOICE_STATUSES.has(invoice.status)) {

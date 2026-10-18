@@ -97,6 +97,7 @@ export default function CompanyDetailContent({ companyId }: { companyId: string 
       supabase.from('borrower_applications')
         .select('id, first_name, last_name, property_address, property_type, purchase_price, deposit_amount, due_diligence_days, app_status, created_at')
         .eq('crm_company_id', companyId)
+        .is('purged_at', null)
         .order('created_at', { ascending: false }),
     ]);
 

@@ -136,6 +136,7 @@ async function verifyApplicationOwnership(
     .select('id')
     .eq('id', applicationId)
     .eq('user_id', userId)
+    .is('purged_at', null)
     .single();
   return !!data;
 }

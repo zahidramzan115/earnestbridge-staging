@@ -106,6 +106,7 @@ export async function PATCH(req: NextRequest) {
     .from('borrower_applications')
     .select('id, user_id, eb_assigned_owner')
     .eq('id', applicationId)
+    .is('purged_at', null)
     .single();
 
   if (fetchError || !current) {

@@ -215,6 +215,30 @@ export async function GET(
     );
   }
 
+  // ── Step 5b: Parent Deal must be active (not purged) ─────────────────────
+  // Service role bypasses RLS, so purge visibility is enforced explicitly.
+  // Return the same response as a missing relationship — never reveal a purge.
+  const { data: activeDeal, error: activeDealError } = await supabase
+    .from('borrower_applications')
+    .select('id')
+    .eq('id', dealId)
+    .is('purged_at', null)
+    .maybeSingle();
+
+  if (activeDealError) {
+    return NextResponse.json(
+      { error: 'invoice_request_failed' },
+      { status: 500, headers: NO_STORE_HEADERS }
+    );
+  }
+
+  if (!activeDeal) {
+    return NextResponse.json(
+      { error: 'deal_access_denied' },
+      { status: 403, headers: NO_STORE_HEADERS }
+    );
+  }
+
   // ── Step 6: Query eligible portal invoices ────────────────────────────────
   // Authorization is confirmed. Now query crm_invoices via service_role.
   //

@@ -62,10 +62,18 @@ export async function GET(
       )
     `)
     .eq('id', id)
+    .is('crm_deal_contacts.borrower_applications.purged_at', null)
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!contact) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  // Drop deal-link rows whose Deal is purged (embedded filter nulls the Deal)
+  if (Array.isArray((contact as any).crm_deal_contacts)) {
+    (contact as any).crm_deal_contacts = (contact as any).crm_deal_contacts.filter(
+      (dc: any) => dc.borrower_applications
+    );
+  }
 
   // Fetch activities
   const { data: activities } = await supabase

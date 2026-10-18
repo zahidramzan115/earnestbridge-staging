@@ -246,6 +246,7 @@ async function resolveClientEmail(
     .from('borrower_applications')
     .select('user_id')
     .eq('id', applicationId)
+    .is('purged_at', null)
     .maybeSingle();
 
   if (app?.user_id) {
@@ -496,6 +497,7 @@ async function reconcileCompletedAutoCloseNotifications(
     supabase
       .from('borrower_applications')
       .select('id, app_status, property_address, company_name, eb_assigned_owner, primary_contact_id, user_id')
+      .is('purged_at', null)
       .in('id', appIds),
   ]);
 
@@ -769,6 +771,7 @@ export async function runOptionCycleAutomation(opts: {
   const { data: deals } = await supabase
     .from('borrower_applications')
     .select('id, user_id, app_status, property_address, company_name, eb_assigned_owner, primary_contact_id')
+    .is('purged_at', null)
     .in('id', appIds);
 
   const dealMap: Record<string, any> = {};

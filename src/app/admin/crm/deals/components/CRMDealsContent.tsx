@@ -293,6 +293,7 @@ export default function CRMDealsContent() {
         crm_companies:crm_company_id(id, company_name),
         crm_deal_contacts(contact_id, role, crm_contacts(id, first_name, last_name))
       `, { count: 'exact' })
+      .is('purged_at', null)
       .order('created_at', { ascending: false })
       .limit(100);
 

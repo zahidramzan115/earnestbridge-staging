@@ -131,7 +131,8 @@ export async function GET() {
   const { data: ownedRows, error: ownedError } = await supabase
     .from('borrower_applications')
     .select('id')
-    .eq('user_id', authenticatedUserId);
+    .eq('user_id', authenticatedUserId)
+    .is('purged_at', null);
 
   if (ownedError) {
     return NextResponse.json({ error: 'Failed to fetch deals' }, { status: 500 });
@@ -175,6 +176,7 @@ export async function GET() {
   const { data: deals, error: dealsError } = await supabase
     .from('borrower_applications')
     .select('id, property_address, company_name, app_status')
+    .is('purged_at', null)
     .in('id', dealIds);
 
   if (dealsError) {

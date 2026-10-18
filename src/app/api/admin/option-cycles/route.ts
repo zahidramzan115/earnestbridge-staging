@@ -274,6 +274,7 @@ export async function POST(request: Request) {
     .from('borrower_applications')
     .select('id, user_id, app_status, property_address')
     .eq('id', application_id)
+    .is('purged_at', null)
     .single();
 
   if (appError || !app) {
@@ -791,6 +792,7 @@ export async function PATCH(request: Request) {
       .from('borrower_applications')
       .select('app_status, user_id')
       .eq('id', applicationId)
+      .is('purged_at', null)
       .single();
 
     if (!dealForOverride) {

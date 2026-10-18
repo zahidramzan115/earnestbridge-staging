@@ -65,6 +65,7 @@ export async function GET(request: Request) {
     supabase
       .from('borrower_applications')
       .select('id, user_id, first_name, last_name, email, property_address, app_status')
+      .is('purged_at', null)
       .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},property_address.ilike.${pattern}`)
       .limit(5),
   ]);

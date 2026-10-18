@@ -451,6 +451,7 @@ export async function POST(request: NextRequest) {
     .from('borrower_applications')
     .select('id, user_id, funded_date')
     .eq('id', application_id)
+    .is('purged_at', null)
     .single();
 
   if (dealError || !deal) {

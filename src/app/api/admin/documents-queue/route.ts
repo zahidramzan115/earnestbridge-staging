@@ -134,7 +134,8 @@ export async function GET(request: NextRequest) {
         )
       `)
       .eq('is_current_version', true)
-      .neq('review_status', 'superseded');
+      .neq('review_status', 'superseded')
+      .is('borrower_applications.purged_at', null);
 
     if (bdError) {
       console.error('[documents-queue] borrower_documents error:', bdError);
@@ -175,7 +176,8 @@ export async function GET(request: NextRequest) {
         )
       `)
       .eq('is_current_version', true)
-      .neq('review_status', 'superseded');
+      .neq('review_status', 'superseded')
+      .is('borrower_applications.purged_at', null);
 
     if (adError) {
       console.error('[documents-queue] application_documents error:', adError);

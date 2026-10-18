@@ -101,6 +101,16 @@ export async function GET(request: Request) {
   if (!applicationId) return NextResponse.json({ error: 'application_id required' }, { status: 400 });
 
   const supabase = getServiceClient();
+
+  // Purged Deals are not active — return no deadlines
+  const { data: parentDeal } = await supabase
+    .from('borrower_applications')
+    .select('id')
+    .eq('id', applicationId)
+    .is('purged_at', null)
+    .maybeSingle();
+  if (!parentDeal) return NextResponse.json({ deadlines: [] });
+
   const { data, error } = await supabase
     .from('crm_deal_deadlines')
     .select('*')
@@ -146,6 +156,7 @@ export async function POST(request: Request) {
     .from('borrower_applications')
     .select('id, user_id')
     .eq('id', application_id)
+    .is('purged_at', null)
     .single();
 
   if (appError || !app) {

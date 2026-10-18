@@ -79,6 +79,7 @@ export async function GET() {
       .from('borrower_applications')
       .select('user_id, first_name, last_name, phone, email')
       .not('user_id', 'is', null)
+      .is('purged_at', null)
       .order('created_at', { ascending: false });
 
     // Build a map of user_id -> profile (first/most recent record wins)

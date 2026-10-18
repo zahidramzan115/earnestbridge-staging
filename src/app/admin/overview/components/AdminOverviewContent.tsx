@@ -440,11 +440,13 @@ export default function AdminOverviewContent() {
       // NEW: Count of currently submitted deals (team-wide, always)
       supabase.from('borrower_applications')
         .select('*', { count: 'exact', head: true })
+        .is('purged_at', null)
         .eq('app_status', 'submitted'),
 
       // NEW: List of submitted deals (team-wide, newest first)
       supabase.from('borrower_applications')
         .select('id, user_id, first_name, last_name, property_address, deposit_amount, due_diligence_days, eb_assigned_owner, submitted_at, created_at, primary_contact_id, crm_contacts(id, first_name, last_name)')
+        .is('purged_at', null)
         .eq('app_status', 'submitted')
         .order('submitted_at', { ascending: false, nullsFirst: false })
         .limit(10),
@@ -485,13 +487,14 @@ export default function AdminOverviewContent() {
       const { data: dealsForActivity } = await supabase
         .from('borrower_applications')
         .select('id, user_id, first_name, last_name, property_address, primary_contact_id, eb_assigned_owner, crm_contacts(id, first_name, last_name)')
+        .is('purged_at', null)
         .in('id', appIds);
 
       const dealMap = new Map<string, any>();
       (dealsForActivity || []).forEach((d: any) => dealMap.set(d.id, d));
 
-      // Build normalized status change rows
-      let normalized: DealStatusChange[] = rawStatusChanges.map((a) => {
+      // Build normalized status change rows (purged Deals are absent from dealMap and excluded)
+      let normalized: DealStatusChange[] = rawStatusChanges.filter((a) => dealMap.has(a.application_id)).map((a) => {
         const deal = dealMap.get(a.application_id);
         const contact = deal?.crm_contacts as any;
         return {
@@ -521,6 +524,7 @@ export default function AdminOverviewContent() {
         const { data: ownerDeals } = await supabase
           .from('borrower_applications')
           .select('id, eb_assigned_owner')
+          .is('purged_at', null)
           .in('id', appIds);
         const ownerMap = new Map<string, string>();
         (ownerDeals || []).forEach((d: any) => ownerMap.set(d.id, d.eb_assigned_owner || 'Unassigned'));

@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
     .from('borrower_applications')
     .select('id, user_id, emd_funded_cents, funded_date, credit_card_payment_enabled, crm_company_id, primary_contact_id')
     .eq('id', application_id)
+    .is('purged_at', null)
     .single();
 
   if (dealError || !deal) {

@@ -73,6 +73,7 @@ export async function GET(request: NextRequest) {
     .from('borrower_applications')
     .select('id, deposit_amount, due_diligence_days')
     .eq('id', applicationId)
+    .is('purged_at', null)
     .single();
 
   if (error || !app) {

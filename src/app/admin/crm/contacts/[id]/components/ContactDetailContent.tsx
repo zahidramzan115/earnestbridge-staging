@@ -378,11 +378,17 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
         )
       `)
       .eq('id', contactId)
+      .is('crm_deal_contacts.borrower_applications.purged_at', null)
       .single();
 
     if (contactData) {
-      setContact(contactData as Contact);
-      setEditForm(contactData as Contact);
+      // Drop deal-link rows whose Deal is purged (embedded filter nulls the Deal)
+      const cd = contactData as unknown as Contact;
+      if (Array.isArray(cd.crm_deal_contacts)) {
+        cd.crm_deal_contacts = cd.crm_deal_contacts.filter((dc) => dc.borrower_applications);
+      }
+      setContact(cd);
+      setEditForm(cd);
     }
 
     const results = await Promise.all([

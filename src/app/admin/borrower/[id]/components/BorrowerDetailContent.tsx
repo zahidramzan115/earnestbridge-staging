@@ -2532,8 +2532,14 @@ const BorrowerDetailContent: React.FC = () => {
       .from('borrower_applications')
       .select('*')
       .eq('id', applicationId)
-      .single()
+      .is('purged_at', null)
+      .maybeSingle()
       .then(({ data, error }) => {
+        if (!error && !data) {
+          // Missing or purged Deal — never render it as an active Deal
+          router.replace('/admin/deals');
+          return;
+        }
         if (error || !data) {
           const demo = DEMO_APPLICATIONS[0];
           setApplication(demo);
