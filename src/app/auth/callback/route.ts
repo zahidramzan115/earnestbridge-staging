@@ -1,6 +1,7 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
+import { ensurePortalSignupCrmContact } from '@/lib/server/portalSignupCrm';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -16,6 +17,18 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error && data?.user) {
+      // Verified portal signup -> CRM Contact (non-admin only, best-effort).
+      // A CRM failure must NEVER block verification/login.
+      // Skipped for password-reset flows and Admin accounts.
+      if (next !== '/reset-password' && data.user.app_metadata?.role !== 'admin') {
+        try {
+          const result = await ensurePortalSignupCrmContact(data.user, 'signup');
+          console.log(`[auth/callback] portal signup CRM sync: ${result.outcome}`);
+        } catch (crmErr) {
+          console.error('[auth/callback] portal signup CRM sync failed (non-fatal):', crmErr);
+        }
+      }
+
       // Allow ONLY the exact internal value '/reset-password' from next.
       // Do NOT implement a general open redirect — only this exact equality check is permitted.
       // The redirect destination is always constructed from requestUrl.origin, never from next directly.

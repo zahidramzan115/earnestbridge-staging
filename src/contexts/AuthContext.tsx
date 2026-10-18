@@ -48,7 +48,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       options: {
         data: {
           full_name: (metadata as any)?.fullName || '',
-          avatar_url: (metadata as any)?.avatarUrl || ''
+          avatar_url: (metadata as any)?.avatarUrl || '',
+          phone: (metadata as any)?.phone || '',
+          company: (metadata as any)?.company || ''
         },
         emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || window.location.origin}/auth/callback`
       }
@@ -99,6 +101,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Sign them back out immediately so no session is persisted
       await supabase.auth.signOut();
       throw new Error('Please verify your email address before signing in. Check your inbox for the confirmation link.');
+    }
+
+    // Best-effort safety net: ensure a verified Client has a CRM Contact.
+    // Never blocks or fails sign-in. Identity comes from the server session.
+    if (!isDemoAccount && !isAdminUser && data?.user?.email_confirmed_at) {
+      try {
+        void fetch('/api/portal/ensure-crm-contact', {
+          method: 'POST',
+          credentials: 'same-origin',
+        }).catch(() => {});
+      } catch {
+        // ignore
+      }
     }
 
     return data;

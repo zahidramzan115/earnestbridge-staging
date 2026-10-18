@@ -111,7 +111,11 @@ export default function AuthForm() {
   const handleSignup = async (data: SignupFormData) => {
     setIsLoading(true);
     try {
-      await signUp(data.email, data.password, { fullName: data.fullName });
+      await signUp(data.email, data.password, {
+        fullName: data.fullName,
+        phone: data.phone,
+        company: data.company,
+      });
       toast.success('Account created!', { description: 'Check your email to verify your address, then sign in.' });
       setMode('login');
     } catch (err: any) {
