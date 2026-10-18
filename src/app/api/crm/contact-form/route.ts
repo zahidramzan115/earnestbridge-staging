@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import {
+  requireServiceRoleClient,
+  findAndRestoreContactByEmail,
+  isUniqueViolation,
+} from '@/lib/server/crmContactMatch';
 
 
 import crypto from 'crypto';
@@ -27,10 +31,9 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
 }
 
 // ─── Service client (bypasses RLS for CRM writes) ─────────────────────────────
+// Required service-role client — fails closed, never falls back to the anon key.
 function getServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  return createClient(url, key);
+  return requireServiceRoleClient();
 }
 
 // ─── In-memory rate limiter (per IP, 5 requests per 60s) ─────────────────────
@@ -184,7 +187,16 @@ export async function POST(request: Request) {
 
   // ── Idempotency check ──────────────────────────────────────────────────────
   const idempotencyKey = buildIdempotencyKey(email, message);
-  const supabase = getServiceClient();
+  let supabase: ReturnType<typeof getServiceClient>;
+  try {
+    supabase = getServiceClient();
+  } catch (configErr) {
+    console.error('[CRM] Contact form service client unavailable:', configErr instanceof Error ? configErr.message : configErr);
+    return NextResponse.json(
+      { error: 'Server configuration error. Please contact support.' },
+      { status: 500, headers: corsHeaders }
+    );
+  }
 
   const { data: existingKey } = await supabase
     .from('crm_submission_idempotency')
@@ -203,33 +215,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    // ── Check for existing contact by primary email ────────────────────────
-    let existingContact = null;
-    const { data: primaryMatch } = await supabase
-      .from('crm_contacts')
-      .select('id, first_name, last_name, primary_email, lead_status, assigned_owner')
-      .eq('is_merged', false)
-      .eq('primary_email', email)
-      .maybeSingle();
-
-    if (primaryMatch) {
-      existingContact = primaryMatch;
-    } else {
-      // Check alternate emails
-      const { data: altMatch } = await supabase
-        .from('crm_contact_emails')
-        .select('contact_id, crm_contacts!inner(id, first_name, last_name, primary_email, lead_status, assigned_owner, is_merged)')
-        .eq('email', email)
-        .eq('crm_contacts.is_merged', false)
-        .maybeSingle();
-
-      if (altMatch && altMatch.crm_contacts) {
-        existingContact = altMatch.crm_contacts as typeof primaryMatch;
-      }
-    }
+    // ── Check for existing contact by normalized email (includes purged) ───
+    // Exact lower(trim()) match via RPC; restores the Contact if it was purged.
+    const existingContact = await findAndRestoreContactByEmail(supabase, email, {
+      source: 'contact_form',
+      detail: `${email} submitted the website contact form.`,
+    });
 
     let contactId: string;
     let isNewContact = false;
+    let resolvedExisting: { id: string } | null = existingContact;
 
     // ── Company matching/creation ──────────────────────────────────────────
     let companyId: string | null = null;
@@ -247,9 +242,9 @@ export async function POST(request: Request) {
       // Admin should manually link companies. We only auto-link on exact match.
     }
 
-    if (!existingContact) {
+    let createdContactId: string | null = null;
+    if (!resolvedExisting) {
       // ── Create new contact ───────────────────────────────────────────────
-      isNewContact = true;
       const { data: newContact, error: contactError } = await supabase
         .from('crm_contacts')
         .insert({
@@ -270,11 +265,28 @@ export async function POST(request: Request) {
         .select('id')
         .single();
 
-      if (contactError || !newContact) {
+      if (contactError && isUniqueViolation(contactError)) {
+        // Race / stored-format collision: re-run the exact matcher once.
+        const recovered = await findAndRestoreContactByEmail(supabase, email, {
+          source: 'contact_form',
+          detail: `${email} submitted the website contact form.`,
+        });
+        if (!recovered) {
+          console.error('[CRM] Unique conflict but no matching contact could be resolved:', contactError);
+          return NextResponse.json({ error: 'Failed to create contact' }, { status: 500, headers: corsHeaders });
+        }
+        resolvedExisting = recovered;
+      } else if (contactError || !newContact) {
         console.error('[CRM] Failed to create contact:', contactError);
         return NextResponse.json({ error: 'Failed to create contact' }, { status: 500, headers: corsHeaders });
+      } else {
+        createdContactId = newContact.id as string;
       }
-      contactId = newContact.id;
+    }
+
+    if (createdContactId) {
+      contactId = createdContactId;
+      isNewContact = true;
 
       await supabase.from('crm_activities').insert({
         contact_id: contactId,
@@ -284,10 +296,9 @@ export async function POST(request: Request) {
         actor: 'Website Form',
         metadata: { utm_source, utm_medium, utm_campaign, promo_code: promo_code || null },
       });
-
     } else {
       // ── Existing contact ─────────────────────────────────────────────────
-      contactId = existingContact.id;
+      contactId = (resolvedExisting as { id: string }).id;
 
       await supabase
         .from('crm_contacts')

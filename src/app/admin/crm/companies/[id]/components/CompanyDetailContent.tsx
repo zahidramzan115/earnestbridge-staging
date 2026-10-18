@@ -92,7 +92,7 @@ export default function CompanyDetailContent({ companyId }: { companyId: string 
       supabase.from('crm_companies').select('*').eq('id', companyId).single(),
       supabase.from('crm_contacts')
         .select('id, first_name, last_name, primary_email, phone, lead_status, portal_link_status')
-        .eq('company_id', companyId).eq('is_merged', false).order('created_at', { ascending: false }),
+        .eq('company_id', companyId).eq('is_merged', false).is('purged_at', null).order('created_at', { ascending: false }),
       // Deals: either directly linked to company OR via a contact that belongs to this company
       supabase.from('borrower_applications')
         .select('id, first_name, last_name, property_address, property_type, purchase_price, deposit_amount, due_diligence_days, app_status, created_at')

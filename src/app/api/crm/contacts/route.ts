@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
+import { findContactIdByNormalizedEmail } from '@/lib/server/crmContactMatch';
 
 function getServiceClient() {
   return createClient(
@@ -60,6 +61,7 @@ export async function GET(request: Request) {
       crm_deal_contacts(count)
     `, { count: 'exact' })
     .eq('is_merged', false)
+    .is('purged_at', null)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -91,16 +93,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'primary_email is required' }, { status: 400 });
   }
 
-  // Check for duplicate
-  const { data: existing } = await supabase
-    .from('crm_contacts')
-    .select('id')
-    .eq('is_merged', false)
-    .ilike('primary_email', normalizedEmail)
-    .maybeSingle();
+  // Check for duplicate — exact normalized-email RPC. Includes PURGED Contacts
+  // (so a new active Contact can't duplicate a purged one) and excludes merged.
+  // Admin-created Contacts never auto-restore a purged Contact.
+  let existingId: string | null = null;
+  try {
+    existingId = await findContactIdByNormalizedEmail(supabase, normalizedEmail);
+  } catch (matchErr) {
+    console.error('[CRM] Duplicate email check failed:', matchErr);
+    return NextResponse.json({ error: 'Failed to check for existing contact' }, { status: 500 });
+  }
 
-  if (existing) {
-    return NextResponse.json({ error: 'A contact with this email already exists', existingId: existing.id }, { status: 409 });
+  if (existingId) {
+    return NextResponse.json({ error: 'A contact with this email already exists', existingId }, { status: 409 });
   }
 
   const { data, error } = await supabase
@@ -109,6 +114,9 @@ export async function POST(request: Request) {
     .select()
     .single();
 
+  if (error && error.code === '23505') {
+    return NextResponse.json({ error: 'A contact with this email already exists' }, { status: 409 });
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Log activity

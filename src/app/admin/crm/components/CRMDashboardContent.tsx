@@ -123,21 +123,21 @@ export default function CRMDashboardContent() {
         tasksResult,
       ] = await Promise.all([
         supabase.from('crm_contacts').select('*', { count: 'exact', head: true })
-          .eq('is_merged', false).eq('lead_status', 'New Lead').gte('created_at', monthStart),
+          .eq('is_merged', false).is('purged_at', null).eq('lead_status', 'New Lead').gte('created_at', monthStart),
         supabase.from('crm_contacts').select('*', { count: 'exact', head: true })
-          .eq('is_merged', false).eq('lead_status', 'New Lead').is('last_contacted_at', null),
+          .eq('is_merged', false).is('purged_at', null).eq('lead_status', 'New Lead').is('last_contacted_at', null),
         supabase.from('crm_contacts').select('*', { count: 'exact', head: true })
-          .eq('is_merged', false).eq('lead_status', 'Qualified'),
+          .eq('is_merged', false).is('purged_at', null).eq('lead_status', 'Qualified'),
         supabase.from('crm_contacts').select('*', { count: 'exact', head: true })
-          .eq('is_merged', false).eq('assigned_owner', 'Unassigned'),
+          .eq('is_merged', false).is('purged_at', null).eq('assigned_owner', 'Unassigned'),
         supabase.from('crm_contacts').select('*', { count: 'exact', head: true })
-          .eq('is_merged', false).eq('portal_link_status', 'pending'),
+          .eq('is_merged', false).is('purged_at', null).eq('portal_link_status', 'pending'),
         supabase.from('crm_tasks').select('*', { count: 'exact', head: true })
           .eq('task_status', 'Open').eq('due_date', today),
         supabase.from('crm_tasks').select('*', { count: 'exact', head: true })
           .eq('task_status', 'Open').lt('due_date', today),
         supabase.from('crm_contacts').select('id, first_name, last_name, primary_email, lead_status, assigned_owner, created_at, crm_companies(company_name)')
-          .eq('is_merged', false).order('created_at', { ascending: false }).limit(8),
+          .eq('is_merged', false).is('purged_at', null).order('created_at', { ascending: false }).limit(8),
         supabase.from('crm_activities').select('id, event_type, title, detail, actor, created_at, crm_contacts(first_name, last_name)')
           .order('created_at', { ascending: false }).limit(12),
         supabase.from('crm_tasks').select('id, title, due_date, priority, assigned_to, crm_contacts(first_name, last_name)')

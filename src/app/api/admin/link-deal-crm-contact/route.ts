@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
+import {
+  findContactIdByNormalizedEmail,
+  restorePurgedContactIfNeeded,
+} from '@/lib/server/crmContactMatch';
 
 /**
  * POST /api/admin/link-deal-crm-contact
@@ -107,31 +111,42 @@ export async function POST(req: NextRequest) {
     // NEVER create a new CRM Contact inside this endpoint.
     let existingContact: { id: string; primary_email: string; portal_user_id: string | null } | null = null;
 
-    // Primary lookup: portal_user_id = authenticated user's ID (server-derived)
+    // Primary lookup: portal_user_id = authenticated user's ID (server-derived).
+    // NOTE: purged_at is intentionally NOT filtered — a purged Contact with
+    // active portal access must be locatable so it can be auto-restored.
     const { data: byUserId } = await supabase
       .from('crm_contacts')
       .select('id, primary_email, portal_user_id')
       .eq('portal_user_id', authedUser.id)
       .eq('is_merged', false)
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (byUserId) {
       existingContact = byUserId;
     }
 
-    // Email fallback: use the authenticated user's email from the session,
-    // NOT a client-supplied value.
+    // Email fallback: exact normalized-email RPC (includes purged, excludes
+    // merged) using the authenticated user's session email, NOT a client value.
     if (!existingContact && authedUser.email) {
-      const { data: byEmail } = await supabase
-        .from('crm_contacts')
-        .select('id, primary_email, portal_user_id')
-        .ilike('primary_email', authedUser.email.trim())
-        .eq('is_merged', false)
-        .limit(1)
-        .single();
+      let matchedId: string | null = null;
+      try {
+        matchedId = await findContactIdByNormalizedEmail(supabase, authedUser.email);
+      } catch (matchErr) {
+        console.error('[link-deal-crm-contact] normalized email lookup failed:', matchErr);
+        return NextResponse.json({ error: 'Failed to look up CRM contact' }, { status: 500 });
+      }
 
-      if (byEmail) existingContact = byEmail;
+      if (matchedId) {
+        const { data: byEmail } = await supabase
+          .from('crm_contacts')
+          .select('id, primary_email, portal_user_id')
+          .eq('id', matchedId)
+          .eq('is_merged', false)
+          .maybeSingle();
+
+        if (byEmail) existingContact = byEmail;
+      }
     }
 
     if (!existingContact) {
@@ -143,6 +158,20 @@ export async function POST(req: NextRequest) {
     }
 
     const contactId = existingContact.id;
+
+    // Restore the Contact to the active Admin CRM if it was purged (new Deal =
+    // new inbound activity). Clears only purge fields; never touches portal
+    // state, borrower_access, Deals or merge state.
+    try {
+      await restorePurgedContactIfNeeded(supabase, contactId, {
+        source: 'apply_link_deal',
+        detail: `A new Deal (${applicationId}) was submitted through /apply.`,
+      });
+    } catch (restoreErr) {
+      console.error('[link-deal-crm-contact] Contact auto-restore failed:', restoreErr);
+      return NextResponse.json({ error: 'Failed to restore CRM contact' }, { status: 500 });
+    }
+
     const alreadyLinked = app.primary_contact_id === contactId;
 
     // ── 6. Check if crm_deal_contacts row already exists (idempotency) ─────

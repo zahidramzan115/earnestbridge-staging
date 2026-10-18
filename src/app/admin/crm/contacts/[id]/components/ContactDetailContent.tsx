@@ -1,9 +1,10 @@
 'use client';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Icon from '@/components/ui/AppIcon';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import CreateDealModal from '@/app/admin/deals/components/CreateDealModal';
 import EmailAttachmentPicker, { AttachmentDescriptor, cleanupAttachments } from '@/components/EmailAttachmentPicker';
 
@@ -297,9 +298,19 @@ function CompanyAssignSection({
 export default function ContactDetailContent({ contactId }: { contactId: string }) {
   const supabase = createClient();
   const router = useRouter();
+  const { isSuperAdmin } = useAuth();
+  const canPurge = isSuperAdmin();
 
-  const [contact, setContact] = useState<Contact | null>(null);
-  const [activities, setActivities] = useState<Activity[]>([]);
+  // Purge state (SuperAdmin only; server is the authoritative boundary)
+  const [showPurge, setShowPurge] = useState(false);
+  const [purgeReason, setPurgeReason] = useState('');
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [purging, setPurging] = useState(false);
+  const [purgeError, setPurgeError] = useState<string | null>(null);
+  const purgeLockRef = useRef(false);
+  const [purgeToast, setPurgeToast] = useState<string | null>(null);
+
+  const [contact, setContact] = useState<Contact | null>(null);  const [activities, setActivities] = useState<Activity[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
@@ -378,8 +389,16 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
         )
       `)
       .eq('id', contactId)
+      .eq('is_merged', false)
+      .is('purged_at', null)
       .is('crm_deal_contacts.borrower_applications.purged_at', null)
-      .single();
+      .maybeSingle();
+
+    if (!contactData) {
+      // Missing, merged or purged Contact — never render an empty shell
+      router.replace('/admin/crm/contacts');
+      return;
+    }
 
     if (contactData) {
       // Drop deal-link rows whose Deal is purged (embedded filter nulls the Deal)
@@ -401,7 +420,7 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
     setTasks((results[1].data as Task[]) || []);
     setSubmissions((results[2].data as Submission[]) || []);
     setLoading(false);
-  }, [contactId, supabase]);
+  }, [contactId, supabase, router]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -541,6 +560,7 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
       .from('crm_contacts')
       .select('id, first_name, last_name, primary_email, lead_status')
       .eq('is_merged', false)
+      .is('purged_at', null)
       .neq('id', contactId)
       .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,primary_email.ilike.%${q}%`)
       .limit(8);
@@ -676,6 +696,57 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
     setCallLogged(true);
     await load();
     setLoggingCall(false);
+  };
+
+  // ── Purge Handlers (SuperAdmin) ───────────────────────────────────────────
+
+  const closePurgeDialog = () => {
+    if (purgeLockRef.current) return;
+    setShowPurge(false);
+    setPurgeReason('');
+    setPurgeConfirmText('');
+    setPurgeError(null);
+  };
+
+  const handlePurgeContact = async () => {
+    if (purgeLockRef.current) return;
+    if (!contact) return;
+    const reason = purgeReason.trim();
+    if (!reason || purgeConfirmText !== 'PURGE') return;
+    purgeLockRef.current = true;
+    setPurging(true);
+    setPurgeError(null);
+    try {
+      const res = await fetch(`/api/admin/contacts/${contact.id}/purge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purge_reason: reason }),
+      });
+      if (res.ok) {
+        setShowPurge(false);
+        setPurgeToast('Contact purged. It is now hidden from the Admin CRM.');
+        router.replace('/admin/crm/contacts');
+      } else if (res.status === 401) {
+        setPurgeError('Your session has expired. Please sign in again.');
+      } else if (res.status === 403) {
+        setPurgeError('Only a SuperAdmin can purge a Contact.');
+      } else if (res.status === 404) {
+        setShowPurge(false);
+        router.replace('/admin/crm/contacts');
+      } else if (res.status === 409) {
+        setPurgeError('This Contact has been merged and cannot be purged.');
+      } else if (res.status === 400) {
+        const j = await res.json().catch(() => null);
+        setPurgeError(j?.error || 'Invalid request.');
+      } else {
+        setPurgeError('The purge could not be confirmed. Please refresh the page to check the Contact status before retrying.');
+      }
+    } catch {
+      setPurgeError('A network error occurred. The purge may or may not have completed. Please refresh the page before retrying.');
+    } finally {
+      purgeLockRef.current = false;
+      setPurging(false);
+    }
   };
 
   if (loading) {
@@ -823,6 +894,16 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
               <Icon name="ArrowsRightLeftIcon" size={13} />
               Merge
             </button>
+            {canPurge && (
+              <button
+                onClick={() => setShowPurge(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-500 text-red-500 border border-red-200 rounded-lg hover:bg-red-50 hover:text-red-700 transition-colors flex-shrink-0"
+                title="Purge contact"
+              >
+                <Icon name="TrashIcon" size={13} />
+                Purge Contact
+              </button>
+            )}
           </div>
         </div>
 
@@ -1595,6 +1676,84 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
           </div>
         </div>
       )}
+
+      {purgeToast && (
+        <div
+          role="status"
+          className="fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-xl shadow-lg text-sm font-medium border bg-emerald-50 text-emerald-800 border-emerald-200"
+        >
+          {purgeToast}
+        </div>
+      )}
+
+      {/* Purge Contact Modal (SuperAdmin) */}
+      {canPurge && showPurge && (() => {
+        const canSubmit = !purging && purgeReason.trim().length > 0 && purgeConfirmText === 'PURGE';
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={closePurgeDialog} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-red-100">
+                  <Icon name="ExclamationTriangleIcon" size={20} className="text-red-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-display font-700 text-gray-900 text-base">Purge Contact</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {`Contact: ${contact.first_name} ${contact.last_name}. `}
+                    This hides the Contact from the Admin CRM but preserves the Contact, its Deals, and its Client Portal access. The Contact is not physically deleted and its Deals are unaffected. Recovery can be added later.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label htmlFor="contact-purge-reason" className="block text-xs font-600 text-gray-700 mb-1">Purge reason (required)</label>
+                  <textarea
+                    id="contact-purge-reason"
+                    value={purgeReason}
+                    onChange={e => setPurgeReason(e.target.value)}
+                    maxLength={1000}
+                    rows={3}
+                    disabled={purging}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="contact-purge-confirm" className="block text-xs font-600 text-gray-700 mb-1">
+                    Type <span className="font-mono font-700">PURGE</span> to confirm
+                  </label>
+                  <input
+                    id="contact-purge-confirm"
+                    type="text"
+                    value={purgeConfirmText}
+                    onChange={e => setPurgeConfirmText(e.target.value)}
+                    disabled={purging}
+                    autoComplete="off"
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  />
+                </div>
+                {purgeError && <p className="text-sm text-red-600" role="alert">{purgeError}</p>}
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={closePurgeDialog}
+                  disabled={purging}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handlePurgeContact}
+                  disabled={!canSubmit}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {purging ? 'Purging…' : 'Purge Contact'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Merge Modal */}
       {showMerge && (

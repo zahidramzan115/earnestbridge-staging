@@ -213,6 +213,8 @@ export async function POST(
     .from('crm_contacts')
     .select('id, first_name, last_name, primary_email')
     .eq('id', contactId)
+    .eq('is_merged', false)
+    .is('purged_at', null)
     .single();
 
   if (contactError || !contact) {

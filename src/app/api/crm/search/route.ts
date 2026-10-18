@@ -51,6 +51,7 @@ export async function GET(request: Request) {
       .from('crm_contacts')
       .select('id, first_name, last_name, primary_email, phone, lead_status, assigned_owner')
       .eq('is_merged', false)
+      .is('purged_at', null)
       .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},primary_email.ilike.${pattern},phone.ilike.${pattern}`)
       .limit(8),
 
@@ -84,7 +85,8 @@ export async function GET(request: Request) {
       .from('crm_contacts')
       .select('id, first_name, last_name, primary_email, phone, lead_status, assigned_owner')
       .in('id', altContactIds)
-      .eq('is_merged', false);
+      .eq('is_merged', false)
+      .is('purged_at', null);
     altContacts = data || [];
   }
 

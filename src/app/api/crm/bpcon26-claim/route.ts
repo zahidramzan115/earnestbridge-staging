@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import {
+  findAndRestoreContactByEmail,
+  isUniqueViolation,
+} from '@/lib/server/crmContactMatch';
 
 // ─── Constants (server-side only — never from browser) ────────────────────────
 const BPCON26_CAMPAIGN      = 'BPCON26';
@@ -166,29 +170,11 @@ export async function POST(request: Request) {
 
   try {
     // ── Step 1: Find or create CRM Contact ────────────────────────────────────
-    let existingContact: { id: string; first_name: string; last_name: string; primary_email: string } | null = null;
-
-    const { data: primaryMatch } = await supabase
-      .from('crm_contacts')
-      .select('id, first_name, last_name, primary_email')
-      .eq('is_merged', false)
-      .eq('primary_email', email)
-      .maybeSingle();
-
-    if (primaryMatch) {
-      existingContact = primaryMatch;
-    } else {
-      const { data: altMatch } = await supabase
-        .from('crm_contact_emails')
-        .select('contact_id, crm_contacts!inner(id, first_name, last_name, primary_email, is_merged)')
-        .eq('email', email)
-        .eq('crm_contacts.is_merged', false)
-        .maybeSingle();
-
-      if (altMatch && altMatch.crm_contacts) {
-        existingContact = altMatch.crm_contacts as typeof primaryMatch;
-      }
-    }
+    // Exact lower(trim()) match via RPC (includes purged Contacts); restores if purged.
+    let existingContact: { id: string } | null = await findAndRestoreContactByEmail(supabase, email, {
+      source: 'bpcon26_claim',
+      detail: `${email} claimed the BPCON26 promo.`,
+    });
 
     let contactId: string;
     let isNewContact = false;
@@ -204,8 +190,8 @@ export async function POST(request: Request) {
       if (exactCompany) companyId = exactCompany.id;
     }
 
+    let createdContactId: string | null = null;
     if (!existingContact) {
-      isNewContact = true;
       const { data: newContact, error: contactError } = await supabase
         .from('crm_contacts')
         .insert({
@@ -226,13 +212,30 @@ export async function POST(request: Request) {
         .select('id')
         .single();
 
-      if (contactError || !newContact) {
+      if (contactError && isUniqueViolation(contactError)) {
+        // Race / stored-format collision: re-run the exact matcher once.
+        const recovered = await findAndRestoreContactByEmail(supabase, email, {
+          source: 'bpcon26_claim',
+          detail: `${email} claimed the BPCON26 promo.`,
+        });
+        if (!recovered) {
+          console.error('[BPCON26] Unique conflict but no matching contact could be resolved:', contactError);
+          return NextResponse.json({ error: 'Failed to create CRM contact' }, { status: 500, headers: corsHeaders });
+        }
+        existingContact = recovered;
+      } else if (contactError || !newContact) {
         console.error('[BPCON26] Failed to create contact:', contactError);
         return NextResponse.json({ error: 'Failed to create CRM contact' }, { status: 500, headers: corsHeaders });
+      } else {
+        createdContactId = newContact.id as string;
       }
-      contactId = newContact.id;
+    }
+
+    if (createdContactId) {
+      isNewContact = true;
+      contactId = createdContactId;
     } else {
-      contactId = existingContact.id;
+      contactId = (existingContact as { id: string }).id;
       // Update latest lead source for existing contact
       await supabase
         .from('crm_contacts')

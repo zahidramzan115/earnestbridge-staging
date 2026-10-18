@@ -62,10 +62,13 @@ export async function GET(
       )
     `)
     .eq('id', id)
+    .eq('is_merged', false)
+    .is('purged_at', null)
     .is('crm_deal_contacts.borrower_applications.purged_at', null)
-    .single();
+    .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Missing, merged or purged Contacts are all a plain 404 (no purge disclosure)
   if (!contact) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   // Drop deal-link rows whose Deal is purged (embedded filter nulls the Deal)
@@ -156,16 +159,22 @@ export async function PATCH(
     .from('crm_contacts')
     .select('lead_status, assigned_owner')
     .eq('id', id)
+    .eq('is_merged', false)
+    .is('purged_at', null)
     .single();
 
   const { data, error } = await supabase
     .from('crm_contacts')
     .update({ ...body, updated_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('is_merged', false)
+    .is('purged_at', null)
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Missing, merged or purged Contacts are a plain 404
+  if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   // Log status change
   if (current && body.lead_status && body.lead_status !== current.lead_status) {

@@ -291,6 +291,7 @@ export default function CreateDealModal({
       .from('crm_contacts')
       .select('id, first_name, last_name, primary_email, phone, lead_status, crm_companies(id, company_name)')
       .eq('is_merged', false)
+      .is('purged_at', null)
       .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,primary_email.ilike.%${q}%`)
       .limit(10);
     setCrmContacts((data as CRMContactRecord[]) || []);

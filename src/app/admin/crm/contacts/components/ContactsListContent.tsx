@@ -1,9 +1,10 @@
 'use client';
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Icon from '@/components/ui/AppIcon';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Contact {
   id: string;
@@ -76,6 +77,79 @@ export default function ContactsListContent() {
   const [portalFilter, setPortalFilter] = useState(searchParams.get('portal_status') || '');
   const [showNewModal, setShowNewModal] = useState(false);
 
+  // Purge state (SuperAdmin only; server is the authoritative boundary)
+  const { isSuperAdmin } = useAuth();
+  const canPurge = isSuperAdmin();
+  const [purgeTargetId, setPurgeTargetId] = useState<string | null>(null);
+  const [purgeReason, setPurgeReason] = useState('');
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [purging, setPurging] = useState(false);
+  const [purgeError, setPurgeError] = useState<string | null>(null);
+  const purgeLockRef = useRef(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const showToast = useCallback((type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 6000);
+  }, []);
+
+  const closePurgeDialog = () => {
+    if (purgeLockRef.current) return;
+    setPurgeTargetId(null);
+    setPurgeReason('');
+    setPurgeConfirmText('');
+    setPurgeError(null);
+  };
+
+  const handlePurgeContact = async () => {
+    if (purgeLockRef.current) return;
+    if (!purgeTargetId) return;
+    const reason = purgeReason.trim();
+    if (!reason || purgeConfirmText !== 'PURGE') return;
+    purgeLockRef.current = true;
+    const idToPurge = purgeTargetId;
+    setPurging(true);
+    setPurgeError(null);
+    const removeFromList = () => {
+      setContacts((prev) => prev.filter((c) => c.id !== idToPurge));
+      setTotal((t) => Math.max(0, t - 1));
+      setPurgeTargetId(null);
+      setPurgeReason('');
+      setPurgeConfirmText('');
+    };
+    try {
+      const res = await fetch(`/api/admin/contacts/${idToPurge}/purge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purge_reason: reason }),
+      });
+      if (res.ok) {
+        removeFromList();
+        showToast('success', 'Contact purged. It is now hidden from the Admin CRM.');
+      } else if (res.status === 401) {
+        setPurgeError('Your session has expired. Please sign in again.');
+      } else if (res.status === 403) {
+        setPurgeError('Only a SuperAdmin can purge a Contact.');
+      } else if (res.status === 404) {
+        removeFromList();
+        showToast('error', 'Contact not found. It may already have been removed.');
+      } else if (res.status === 409) {
+        removeFromList();
+        showToast('error', 'This Contact has been merged and cannot be purged.');
+      } else if (res.status === 400) {
+        const j = await res.json().catch(() => null);
+        setPurgeError(j?.error || 'Invalid request.');
+      } else {
+        setPurgeError('The purge could not be confirmed. Please refresh the list to check the Contact status before retrying.');
+      }
+    } catch {
+      setPurgeError('A network error occurred. The purge may or may not have completed. Please refresh the list before retrying.');
+    } finally {
+      purgeLockRef.current = false;
+      setPurging(false);
+    }
+  };
+
   const loadContacts = useCallback(async () => {
     setLoading(true);
     const offset = (page - 1) * LIMIT;
@@ -90,6 +164,7 @@ export default function ContactsListContent() {
         crm_deal_contacts(count)
       `, { count: 'exact' })
       .eq('is_merged', false)
+      .is('purged_at', null)
       .order('created_at', { ascending: false })
       .range(offset, offset + LIMIT - 1);
 
@@ -238,6 +313,7 @@ export default function ContactsListContent() {
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider hidden lg:table-cell">Follow-Up</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider hidden md:table-cell">Portal</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider hidden xl:table-cell">Created</th>
+                  {canPurge && <th className="px-4 py-3" aria-label="Actions" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -293,6 +369,18 @@ export default function ContactsListContent() {
                       <td className="px-4 py-3 hidden xl:table-cell">
                         <span className="text-xs text-gray-400">{formatDate(c.created_at)}</span>
                       </td>
+                      {canPurge && (
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setPurgeTargetId(c.id); }}
+                            title="Purge contact"
+                            className="flex items-center gap-1 text-xs font-600 text-red-500 hover:text-red-700 whitespace-nowrap"
+                          >
+                            <Icon name="TrashIcon" size={12} />
+                            Purge Contact
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -326,6 +414,86 @@ export default function ContactsListContent() {
           </div>
         )}
       </div>
+
+      {toast && (
+        <div
+          role="status"
+          className={`fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-xl shadow-lg text-sm font-medium border ${
+            toast.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
+
+      {canPurge && purgeTargetId !== null && (() => {
+        const target = contacts.find((c) => c.id === purgeTargetId);
+        const canSubmit = !purging && purgeReason.trim().length > 0 && purgeConfirmText === 'PURGE';
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={closePurgeDialog} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-red-100">
+                  <Icon name="ExclamationTriangleIcon" size={20} className="text-red-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-display font-700 text-gray-900 text-base">Purge Contact</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {target ? `Contact: ${target.first_name} ${target.last_name}. ` : ''}
+                    This hides the Contact from the Admin CRM but preserves the Contact, its Deals, and its Client Portal access. The Contact is not physically deleted and its Deals are unaffected. Recovery can be added later.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label htmlFor="contact-list-purge-reason" className="block text-xs font-600 text-gray-700 mb-1">Purge reason (required)</label>
+                  <textarea
+                    id="contact-list-purge-reason"
+                    value={purgeReason}
+                    onChange={(e) => setPurgeReason(e.target.value)}
+                    maxLength={1000}
+                    rows={3}
+                    disabled={purging}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="contact-list-purge-confirm" className="block text-xs font-600 text-gray-700 mb-1">
+                    Type <span className="font-mono font-700">PURGE</span> to confirm
+                  </label>
+                  <input
+                    id="contact-list-purge-confirm"
+                    type="text"
+                    value={purgeConfirmText}
+                    onChange={(e) => setPurgeConfirmText(e.target.value)}
+                    disabled={purging}
+                    autoComplete="off"
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  />
+                </div>
+                {purgeError && <p className="text-sm text-red-600" role="alert">{purgeError}</p>}
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={closePurgeDialog}
+                  disabled={purging}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handlePurgeContact}
+                  disabled={!canSubmit}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {purging ? 'Purging…' : 'Purge Contact'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

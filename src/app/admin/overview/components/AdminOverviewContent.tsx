@@ -380,11 +380,11 @@ export default function AdminOverviewContent() {
       // Action card counts
       applyOwner(
         supabase.from('crm_contacts').select('*', { count: 'exact', head: true })
-          .eq('is_merged', false).eq('lead_status', 'New Lead'),
+          .eq('is_merged', false).is('purged_at', null).eq('lead_status', 'New Lead'),
         'assigned_owner'
       ),
       supabase.from('crm_contacts').select('*', { count: 'exact', head: true })
-        .eq('is_merged', false).eq('assigned_owner', 'Unassigned'),
+        .eq('is_merged', false).is('purged_at', null).eq('assigned_owner', 'Unassigned'),
       applyOwner(
         supabase.from('crm_tasks').select('*', { count: 'exact', head: true })
           .eq('task_status', 'Open').eq('due_date', today),
@@ -400,7 +400,7 @@ export default function AdminOverviewContent() {
       applyOwner(
         supabase.from('crm_contacts')
           .select('id, first_name, last_name, primary_email, phone, lead_status, assigned_owner, lead_source, created_at, crm_companies(company_name)')
-          .eq('is_merged', false).eq('lead_status', 'New Lead')
+          .eq('is_merged', false).is('purged_at', null).eq('lead_status', 'New Lead')
           .order('created_at', { ascending: false }).limit(5),
         'assigned_owner'
       ),
@@ -630,6 +630,7 @@ export default function AdminOverviewContent() {
         .from('crm_contacts')
         .select('id, first_name, last_name, primary_email, lead_status, assigned_owner, created_at, crm_companies(company_name)')
         .eq('is_merged', false)
+        .is('purged_at', null)
         .eq('assigned_owner', 'Unassigned')
         .not('lead_status', 'in', '("Lost","Not Qualified")')
         .order('created_at', { ascending: false })
