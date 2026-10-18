@@ -266,3 +266,8 @@ CREATE POLICY "borrower_applications_active_unrevoked_guard"
 --   -- Example: revoked-user check helper (as the user)
 --   -- SELECT public.is_portal_access_revoked();
 -- ============================================================
+
+-- DISCARDED (Phase 7G-2). This migration was NEVER pushed to Supabase and is intentionally a no-op.
+-- It is superseded by 20261007000100_soft_purge_portal_access_security_foundation_v2.sql.
+-- This file contains no statements and can be safely deleted from the repository.
+SELECT 1;
