@@ -1,3 +1,4 @@
+-- Reviewed and approved for Supabase gate surfacing in Phase 7G-2E.
 -- ============================================================
 -- Migration: soft_purge_portal_access_security_foundation_v2
 -- Timestamp: 20261007000100
