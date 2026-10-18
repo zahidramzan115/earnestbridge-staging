@@ -100,6 +100,12 @@ export async function GET(
   return NextResponse.json({ contact, activities, tasks, submissions });
 }
 
+// Fields the active Contact UI sends through PATCH /api/crm/contacts/[id].
+// Callers (ContactDetailContent): handleStatusChange -> { lead_status },
+// handleOwnerChange -> { assigned_owner }. Everything else is rejected.
+const PATCH_ALLOWED_FIELDS = ['lead_status', 'assigned_owner'] as const;
+type PatchAllowedField = (typeof PATCH_ALLOWED_FIELDS)[number];
+
 // PATCH /api/crm/contacts/[id]
 export async function PATCH(
   request: Request,
@@ -109,13 +115,46 @@ export async function PATCH(
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const body = await request.json();
+
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'invalid_request_body' }, { status: 400 });
+  }
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return NextResponse.json({ error: 'invalid_request_body' }, { status: 400 });
+  }
+
+  const incoming = rawBody as Record<string, unknown>;
+  const keys = Object.keys(incoming);
+  if (keys.length === 0) {
+    return NextResponse.json({ error: 'no_fields_provided' }, { status: 400 });
+  }
+  const hasDisallowed = keys.some(
+    (k) => !(PATCH_ALLOWED_FIELDS as readonly string[]).includes(k)
+  );
+  if (hasDisallowed) {
+    return NextResponse.json({ error: 'field_not_allowed' }, { status: 400 });
+  }
+
+  const body: Partial<Record<PatchAllowedField, string>> = {};
+  for (const key of PATCH_ALLOWED_FIELDS) {
+    if (key in incoming) {
+      const value = incoming[key];
+      if (typeof value !== 'string') {
+        return NextResponse.json({ error: 'invalid_field_value' }, { status: 400 });
+      }
+      body[key] = value;
+    }
+  }
+
   const supabase = getServiceClient();
 
   // Get current contact for activity logging
   const { data: current } = await supabase
     .from('crm_contacts')
-    .select('lead_status, assigned_owner, portal_link_status')
+    .select('lead_status, assigned_owner')
     .eq('id', id)
     .single();
 
@@ -150,42 +189,14 @@ export async function PATCH(
     });
   }
 
-  // Log portal approval
-  if (current && body.portal_link_status === 'approved' && current.portal_link_status !== 'approved') {
-    await supabase.from('crm_activities').insert({
-      contact_id: id,
-      event_type: 'portal_access_approved',
-      title: 'Portal access approved by Admin',
-      actor: admin.email || 'Admin',
-      actor_user_id: admin.id,
-    });
-    // Update portal_approved_at
-    await supabase
-      .from('crm_contacts')
-      .update({ portal_approved_at: new Date().toISOString(), portal_approved_by: admin.id })
-      .eq('id', id);
-  }
-
   return NextResponse.json({ contact: data });
 }
 
-// DELETE /api/crm/contacts/[id] — soft delete via merge flag
+// DELETE /api/crm/contacts/[id] — retired. Performs no database mutation.
+// Contact merging is handled exclusively by POST /api/crm/contacts/merge.
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const admin = await requireAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const { id } = await params;
-  const supabase = getServiceClient();
-
-  const { error } = await supabase
-    .from('crm_contacts')
-    .update({ is_merged: true, updated_at: new Date().toISOString() })
-    .eq('id', id);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ error: 'contact_delete_retired' }, { status: 410 });
 }
