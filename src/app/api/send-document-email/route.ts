@@ -2,17 +2,19 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { assertPortalAccess } from '@/lib/server/portalAccess';
+import { sendDocumentEmail } from '@/lib/server/sendDocumentEmail';
 
 // POST /api/send-document-email
-// Called when a borrower uploads a document.
+// Called by an authenticated browser session (e.g. /apply Step 14 LOI upload).
 // Sends confirmation to borrower AND alert to admin (deals@earnestbridge.com).
 // Body: { borrowerEmail, borrowerFirstName, borrowerLastName, documentName, documentType?, propertyAddress? }
 //
-// Portal access: this route is triggered directly by authenticated Clients
-// (/apply LOI upload). If a Client session is present and the account is
-// disabled, the request is rejected with 403 portal_access_disabled.
-// Cookie-less server-to-server calls (from /api/upload-document, which is
-// itself guarded) and Admin sessions are not affected.
+// Security:
+//  - A real authenticated session is REQUIRED (401 otherwise). There is no
+//    anonymous fallback; server-side callers use the shared helper directly.
+//  - Identity is the session user only; no body-supplied userId is trusted.
+//  - Admin sessions: allowed (existing behavior preserved).
+//  - Client sessions: assertPortalAccess() -> 403 portal_access_disabled.
 
 async function getSessionUser() {
   try {
@@ -43,7 +45,11 @@ async function getSessionUser() {
 export async function POST(request: Request) {
   try {
     const sessionUser = await getSessionUser();
-    if (sessionUser && sessionUser.app_metadata?.role !== 'admin') {
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (sessionUser.app_metadata?.role !== 'admin') {
       const denied = await assertPortalAccess(sessionUser.id);
       if (denied) return denied;
     }
@@ -58,68 +64,23 @@ export async function POST(request: Request) {
       propertyAddress,
     } = body;
 
-    if (!borrowerEmail || !documentName) {
-      return NextResponse.json({ error: 'Missing required fields: borrowerEmail, documentName' }, { status: 400 });
-    }
+    const result = await sendDocumentEmail({
+      borrowerEmail,
+      borrowerFirstName,
+      borrowerLastName,
+      documentName,
+      documentType,
+      propertyAddress,
+    });
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json({ error: 'Supabase configuration missing' }, { status: 500 });
-    }
-
-    const edgeFnUrl = `${supabaseUrl}/functions/v1/send-borrower-emails`;
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${supabaseAnonKey}`,
-    };
-
-    const borrowerPayload = {
-      emailType: 'document_upload',
-      borrower: {
-        firstName: borrowerFirstName || '',
-        lastName: borrowerLastName || '',
-        email: borrowerEmail,
-      },
-      application: {
-        documentName,
-        documentType: documentType || 'Document',
-        propertyAddress: propertyAddress || '',
-      },
-    };
-
-    const adminPayload = {
-      emailType: 'admin_document_upload',
-      borrower: {
-        firstName: borrowerFirstName || '',
-        lastName: borrowerLastName || '',
-        email: borrowerEmail,
-      },
-      application: {
-        documentName,
-        documentType: documentType || 'Document',
-        propertyAddress: propertyAddress || '',
-      },
-    };
-
-    // Send both emails in parallel
-    const [borrowerResponse, adminResponse] = await Promise.allSettled([
-      fetch(edgeFnUrl, { method: 'POST', headers, body: JSON.stringify(borrowerPayload) }),
-      fetch(edgeFnUrl, { method: 'POST', headers, body: JSON.stringify(adminPayload) }),
-    ]);
-
-    const borrowerOk = borrowerResponse.status === 'fulfilled' && borrowerResponse.value.ok;
-    const adminOk = adminResponse.status === 'fulfilled' && adminResponse.value.ok;
-
-    if (!borrowerOk) {
-      console.error('Borrower document email failed');
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
     return NextResponse.json({
       success: true,
-      borrowerNotified: borrowerOk,
-      adminNotified: adminOk,
+      borrowerNotified: result.borrowerNotified,
+      adminNotified: result.adminNotified,
     });
   } catch (err: any) {
     console.error('Document email error:', err);

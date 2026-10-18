@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { assertPortalAccess } from '@/lib/server/portalAccess';
+import { sendDocumentEmail } from '@/lib/server/sendDocumentEmail';
 
 // Server-side Supabase client with service role — bypasses all RLS
 function getServiceClient() {
@@ -267,18 +268,15 @@ export async function POST(req: NextRequest) {
           .eq('id', applicationId)
           .single();
 
-        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://earnestbri3677.builtwithrocket.new';
-        fetch(`${baseUrl}/api/send-document-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            borrowerEmail: uploaderEmail,
-            borrowerFirstName: appData?.first_name ?? '',
-            borrowerLastName: appData?.last_name ?? '',
-            documentName: documentName || file.name.replace(/\.[^.]+$/, ''),
-            documentType: file.type.includes('pdf') ? 'PDF' : file.type.includes('image') ? 'Image' : 'Document',
-            propertyAddress: appData?.property_address ?? '',
-          }),
+        // Authorization already enforced above (session + portal access + Deal access).
+        // Call the shared server-only helper directly — no HTTP hop.
+        sendDocumentEmail({
+          borrowerEmail: uploaderEmail,
+          borrowerFirstName: appData?.first_name ?? '',
+          borrowerLastName: appData?.last_name ?? '',
+          documentName: documentName || file.name.replace(/\.[^.]+$/, ''),
+          documentType: file.type.includes('pdf') ? 'PDF' : file.type.includes('image') ? 'Image' : 'Document',
+          propertyAddress: appData?.property_address ?? '',
         }).catch(() => { /* non-fatal */ });
       } catch {
         // Non-fatal — don't block the upload response
