@@ -89,6 +89,8 @@ const DEAL_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded', 'closed
 // approved, in_progress, funded. 'closed' and 'rejected' are terminal; 'application'
 // and 'under_review' are pre-deal intake.
 const ACTIVE_PIPELINE_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded'];
+// Pipeline statuses whose requested EMD has not yet been funded (same non-terminal set)
+const REQUESTED_EMD_PIPELINE_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded'];
 
 const OWNER_OPTIONS = ['All', 'Dan', 'Tucker', 'Eric', 'Unassigned'];
 const PORTAL_FILTERS: { label: string; value: string }[] = [
@@ -405,7 +407,10 @@ export default function AdminDealsContent() {
   }), [deals]);
 
   const activeDeals = useMemo(() => deals.filter(d => ACTIVE_PIPELINE_STATUSES.includes(d.app_status)), [deals]);
-  const unfundedActive = useMemo(() => activeDeals.filter(d => !isFundedEmd(d)), [activeDeals]);
+  const unfundedActive = useMemo(
+    () => deals.filter(d => REQUESTED_EMD_PIPELINE_STATUSES.includes(d.app_status) && !isFundedEmd(d)),
+    [deals]
+  );
   const fundedActive = useMemo(() => activeDeals.filter(d => isFundedEmd(d)), [activeDeals]);
   // deposit_amount is stored in DOLLARS
   const requestedPipeline = useMemo(() => unfundedActive.reduce((s, d) => s + (d.deposit_amount ?? 0), 0), [unfundedActive]);
