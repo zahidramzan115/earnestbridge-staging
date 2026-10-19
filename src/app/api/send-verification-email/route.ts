@@ -1,60 +1,15 @@
 import { NextResponse } from 'next/server';
 
-// POST /api/send-verification-email
-// Sends a branded email-verification message to a newly registered borrower.
-// Body: { email, fullName, verificationLink }
+// RETIRED: Supabase's native confirmation email is the only signup verification email.
+// This endpoint no longer sends anything.
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { email, fullName, verificationLink } = body;
+const retired = () =>
+  NextResponse?.json({ error: 'verification_email_route_retired' }, { status: 410 });
 
-    if (!email || !verificationLink) {
-      return NextResponse.json(
-        { error: 'Missing required fields: email, verificationLink' },
-        { status: 400 }
-      );
-    }
+export async function POST() {
+  return retired();
+}
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json({ error: 'Supabase configuration missing' }, { status: 500 });
-    }
-
-    const edgeFnUrl = `${supabaseUrl}/functions/v1/send-borrower-emails`;
-
-    const payload = {
-      emailType: 'email_verification',
-      borrower: {
-        firstName: fullName?.split(' ')[0] || '',
-        lastName: fullName?.split(' ').slice(1).join(' ') || '',
-        email,
-      },
-      application: {
-        verificationLink,
-      },
-    };
-
-    const response = await fetch(edgeFnUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${supabaseAnonKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const ok = response.ok;
-    if (!ok) {
-      const errText = await response.text();
-      console.error('Verification email failed:', errText);
-    }
-
-    return NextResponse.json({ success: ok });
-  } catch (err: any) {
-    console.error('Verification email error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
+export async function GET() {
+  return retired();
 }

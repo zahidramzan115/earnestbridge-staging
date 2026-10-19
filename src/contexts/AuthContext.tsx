@@ -57,30 +57,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
     if (error) throw error;
 
-    // Send branded verification email via Resend
-    if (data?.user) {
-      try {
-        // Supabase sends its own confirmation link; we piggyback by re-triggering
-        // a resend of the OTP link so we can capture it — instead, we call our
-        // API route which triggers the edge function with the Supabase-generated link.
-        // Since we cannot intercept the Supabase link server-side here, we send a
-        // branded email pointing to the Supabase magic-link flow.
-        const verificationLink = `${process.env.NEXT_PUBLIC_SITE_URL || window.location.origin}/auth/callback`;
-        await fetch('/api/send-verification-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email,
-            fullName: (metadata as any)?.fullName || '',
-            verificationLink,
-          }),
-        });
-      } catch (emailErr) {
-        // Non-fatal: Supabase still sends its own confirmation email as fallback
-        console.warn('Branded verification email failed (Supabase fallback active):', emailErr);
-      }
-    }
-
+    // With "Confirm email" ON, Supabase returns a user with NO session and sends
+    // its own native confirmation email. That is expected, not an error.
+    // No custom verification email is sent from application code.
     return data;
   };
 
@@ -134,7 +113,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // Check if Email is Verified
   const isEmailVerified = () => {
-    return user?.email_confirmed_at !== null;
+    return !!user?.email_confirmed_at;
   };
 
   // Check if current user is admin
