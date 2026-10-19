@@ -89,9 +89,7 @@ const DEAL_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded', 'closed
 // approved, in_progress, funded. 'closed' and 'rejected' are terminal; 'application'
 // and 'under_review' are pre-deal intake.
 const ACTIVE_PIPELINE_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded'];
-// Requested EMD Pipeline stages (independent of Active Deals): unfunded upcoming EMD demand.
-// Sourced from the full non-purged Deal list, NOT from activeDeals.
-const REQUESTED_EMD_PIPELINE_STATUSES: AppStatus[] = ['application', 'under_review', 'approved', 'in_progress'];
+// Requested EMD Pipeline: all non-purged Deals with no funded EMD, regardless of app_status.
 
 const OWNER_OPTIONS = ['All', 'Dan', 'Tucker', 'Eric', 'Unassigned'];
 const PORTAL_FILTERS: { label: string; value: string }[] = [
@@ -408,8 +406,10 @@ export default function AdminDealsContent() {
   }), [deals]);
 
   const activeDeals = useMemo(() => deals.filter(d => ACTIVE_PIPELINE_STATUSES.includes(d.app_status)), [deals]);
+  // Requested EMD Pipeline: full non-purged Deal list (purged_at IS NULL enforced in the fetch),
+  // unfunded only (emd_funded_cents IS NULL OR <= 0). No app_status filter.
   const unfundedActive = useMemo(
-    () => deals.filter(d => REQUESTED_EMD_PIPELINE_STATUSES.includes(d.app_status) && !isFundedEmd(d)),
+    () => deals.filter(d => !isFundedEmd(d)),
     [deals]
   );
   const fundedActive = useMemo(() => activeDeals.filter(d => isFundedEmd(d)), [activeDeals]);
