@@ -54,14 +54,6 @@ const DEAL_STEPS = [
   { step: 6,  key: 'closed',        label: 'Closed',        group: 'deal' },
 ];
 
-const FUNDING_CONDITIONS = [
-  { key: 'w9_signed',               label: 'W-9' },
-  { key: 'mou_signed',              label: 'MOU' },
-  { key: 'option_agreement_signed', label: 'Option Agmt' },
-  { key: 'llc_formed',              label: 'LLC' },
-  { key: 'psa_signed',              label: 'PSA' },
-];
-
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; icon: string }> = {
   application:  { label: 'Application',  color: 'text-gray-600',    bg: 'bg-gray-100',    border: 'border-gray-200',    icon: 'DocumentTextIcon' },
   under_review: { label: 'Under Review', color: 'text-amber-700',   bg: 'bg-amber-100',   border: 'border-amber-200',   icon: 'MagnifyingGlassIcon' },
@@ -131,6 +123,18 @@ function formatDate(dateStr: string | null | undefined): string {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// deposit_goes_hard_date is a Postgres `date` (YYYY-MM-DD). Format from the string
+// parts directly so no timezone conversion can shift the stored calendar date.
+function formatHardDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+  if (!m) return '—';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthIdx = Number(m[2]) - 1;
+  if (monthIdx < 0 || monthIdx > 11) return '—';
+  return `${months[monthIdx]} ${Number(m[3])}, ${m[1]}`;
+}
+
 function getDaysUntil(dateStr: string | null | undefined): number | null {
   if (!dateStr) return null;
   const diff = new Date(dateStr).getTime() - new Date().setHours(0, 0, 0, 0);
@@ -194,6 +198,10 @@ export default function AdminDealsContent() {
   const [ownerFilter, setOwnerFilter] = useState<string>('All');
   const [portalFilter, setPortalFilter] = useState<string>('all');
   const [hardDateDealIds, setHardDateDealIds] = useState<Set<string>>(new Set());
+  // application_id → active-cycle deposit_goes_hard_date (YYYY-MM-DD)
+  const [hardDateByDeal, setHardDateByDeal] = useState<Record<string, string>>({});
+  // application_id → most recently created invoice id
+  const [latestInvoiceByDeal, setLatestInvoiceByDeal] = useState<Record<string, string>>({});
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const { isSuperAdmin } = useAuth();
@@ -225,38 +233,80 @@ export default function AdminDealsContent() {
         console.error('Error fetching deals:', error);
         setDeals([]);
         setHardDateDealIds(new Set());
+        setHardDateByDeal({});
+        setLatestInvoiceByDeal({});
       } else {
         const rows = (data as unknown as BorrowerApplication[]) || [];
         setDeals(rows);
 
-        // Hard dates ≤ 7 days: active option cycle (crm_deal_option_cycles) for funded active Deals
-        const fundedActiveIds = rows
-          .filter(d => ACTIVE_PIPELINE_STATUSES.includes(d.app_status) && isFundedEmd(d))
-          .map(d => d.id);
-        if (fundedActiveIds.length > 0) {
+        const allIds = rows.map(d => d.id);
+        if (allIds.length > 0) {
+          // Batched (no N+1): one query for ALL active option cycles, one for ALL invoices.
+          const [cyclesRes, invoicesRes] = await Promise.all([
+            supabase
+              .from('crm_deal_option_cycles')
+              .select('application_id, deposit_goes_hard_date')
+              .in('application_id', allIds)
+              .eq('status', 'active'),
+            supabase
+              .from('crm_invoices')
+              .select('id, application_id, created_at')
+              .in('application_id', allIds)
+              .order('created_at', { ascending: false }),
+          ]);
+
+          // Hard date per Deal from the active cycle (single active cycle per Deal is DB-enforced)
+          const hardMap: Record<string, string> = {};
+          if (cyclesRes.error) {
+            console.error('Error fetching option cycles:', cyclesRes.error);
+          } else {
+            (cyclesRes.data || []).forEach((c: { application_id: string; deposit_goes_hard_date: string | null }) => {
+              if (c.deposit_goes_hard_date) hardMap[c.application_id] = c.deposit_goes_hard_date;
+            });
+          }
+          setHardDateByDeal(hardMap);
+
+          // Hard Dates ≤ 7 Days metric: same source (active cycle deposit_goes_hard_date),
+          // same predicate as before (funded active Deals within today..today+7 ET).
           const today = getTodayETDateStr(0);
           const horizon = getTodayETDateStr(7);
-          const { data: cycles, error: cycleError } = await supabase
-            .from('crm_deal_option_cycles')
-            .select('application_id, deposit_goes_hard_date')
-            .in('application_id', fundedActiveIds)
-            .eq('status', 'active')
-            .gte('deposit_goes_hard_date', today)
-            .lte('deposit_goes_hard_date', horizon);
-          if (cycleError) {
-            console.error('Error fetching option cycles:', cycleError);
-            setHardDateDealIds(new Set());
+          const hardIds = new Set<string>();
+          rows.forEach(d => {
+            const hd = hardMap[d.id];
+            if (
+              hd &&
+              ACTIVE_PIPELINE_STATUSES.includes(d.app_status) &&
+              isFundedEmd(d) &&
+              hd >= today &&
+              hd <= horizon
+            ) {
+              hardIds.add(d.id);
+            }
+          });
+          setHardDateDealIds(hardIds);
+
+          // Latest invoice per Deal: results are ordered created_at DESC, so first seen wins.
+          const invMap: Record<string, string> = {};
+          if (invoicesRes.error) {
+            console.error('Error fetching invoices:', invoicesRes.error);
           } else {
-            setHardDateDealIds(new Set((cycles || []).map((c: { application_id: string }) => c.application_id)));
+            (invoicesRes.data || []).forEach((inv: { id: string; application_id: string }) => {
+              if (!invMap[inv.application_id]) invMap[inv.application_id] = inv.id;
+            });
           }
+          setLatestInvoiceByDeal(invMap);
         } else {
+          setHardDateByDeal({});
           setHardDateDealIds(new Set());
+          setLatestInvoiceByDeal({});
         }
       }
     } catch (err) {
       console.error('Unexpected error fetching deals:', err);
       setDeals([]);
       setHardDateDealIds(new Set());
+      setHardDateByDeal({});
+      setLatestInvoiceByDeal({});
     } finally {
       setLoading(false);
     }
@@ -294,21 +344,6 @@ export default function AdminDealsContent() {
             }).catch(() => { /* non-fatal */ });
           }
         }
-      }
-    } catch { /* silent */ } finally {
-      setUpdatingId(null);
-    }
-  };
-
-  const handleConditionToggle = async (id: string, field: string, current: boolean) => {
-    setUpdatingId(id);
-    try {
-      const { error } = await supabase
-        .from('borrower_applications')
-        .update({ [field]: !current })
-        .eq('id', id);
-      if (!error) {
-        setDeals(prev => prev.map(d => d.id === id ? { ...d, [field]: !current } : d));
       }
     } catch { /* silent */ } finally {
       setUpdatingId(null);
@@ -542,7 +577,8 @@ export default function AdminDealsContent() {
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Actual EMD Funded</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">DD</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Stage</th>
-                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Funding Conditions</th>
+                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Deposit Goes Hard Date</th>
+                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Invoice</th>
                   <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -551,8 +587,8 @@ export default function AdminDealsContent() {
                   const cfg = STATUS_CONFIG[deal.app_status] ?? STATUS_CONFIG.application;
                   const isActiveDeal = DEAL_STATUSES.includes(deal.app_status);
                   const currentStep = getWorkflowStep(deal);
-                  const conditions = FUNDING_CONDITIONS.map(c => ({ ...c, met: !!(deal as Record<string, unknown>)[c.key] }));
-                  const metCount = conditions.filter(c => c.met).length;
+                  const hardDate = hardDateByDeal[deal.id];
+                  const latestInvoiceId = latestInvoiceByDeal[deal.id];
 
                   return (
                     <React.Fragment key={deal.id}>
@@ -609,31 +645,22 @@ export default function AdminDealsContent() {
                           </div>
                         </td>
                         <td className="px-4 py-3.5">
-                          {isActiveDeal ? (
-                            <div>
-                              <div className="flex flex-wrap gap-1">
-                                {conditions.map(c => (
-                                  <button
-                                    key={c.key}
-                                    disabled={updatingId === deal.id}
-                                    onClick={() => handleConditionToggle(deal.id, c.key, c.met)}
-                                    title={`Toggle ${c.label}`}
-                                    className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-display font-700 border transition-all ${
-                                      c.met
-                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' :'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
-                                    }`}
-                                  >
-                                    <Icon name={c.met ? 'CheckIcon' : 'MinusIcon'} size={8} />
-                                    {c.label}
-                                  </button>
-                                ))}
-                              </div>
-                              <p className={`text-[10px] mt-1 font-600 ${metCount === conditions.length ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                {metCount}/{conditions.length} met
-                              </p>
-                            </div>
+                          {hardDate ? (
+                            <p className="text-sm font-600 text-gray-700 whitespace-nowrap tabular-nums">{formatHardDate(hardDate)}</p>
                           ) : (
-                            <span className="text-xs text-gray-400 italic">N/A</span>
+                            <p className="text-gray-400">—</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          {latestInvoiceId ? (
+                            <Link
+                              href={`/admin/invoices/${latestInvoiceId}`}
+                              className="inline-flex items-center px-2 py-1 rounded-md border border-eb-green-900/20 text-xs font-600 text-eb-green-900 hover:bg-eb-green-50 whitespace-nowrap transition-all"
+                            >
+                              View Invoice
+                            </Link>
+                          ) : (
+                            <p className="text-gray-400">—</p>
                           )}
                         </td>
                         <td className="px-4 py-3.5">
