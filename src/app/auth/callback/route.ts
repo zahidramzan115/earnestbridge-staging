@@ -5,7 +5,8 @@ import type { User } from '@supabase/supabase-js';
 import { ensurePortalSignupCrmContact } from '@/lib/server/portalSignupCrm';
 
 // Only these OTP types are accepted for token_hash verification callbacks.
-const SUPPORTED_OTP_TYPES = ['signup'] as const;
+// 'email' is the canonical Supabase Confirm Signup type; 'signup' is retained as a legacy alias.
+const SUPPORTED_OTP_TYPES = ['email', 'signup'] as const;
 type SupportedOtpType = (typeof SUPPORTED_OTP_TYPES)[number];
 
 function isSupportedOtpType(value: string | null): value is SupportedOtpType {
