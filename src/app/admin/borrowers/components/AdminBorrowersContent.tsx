@@ -25,6 +25,9 @@ interface AuthUserRecord {
   id: string;
   email: string;
   created_at: string;
+  full_name?: string;
+  email_confirmed_at?: string | null;
+  email_verified?: boolean;
 }
 
 interface UserRow {
@@ -40,6 +43,8 @@ interface UserRow {
   lifetimeEmdFunded: number;
   dateJoined: string;
   latestAppId: string;
+  // true = Email Verified, false = Pending Email Verification, null = Auth record unavailable
+  emailVerified: boolean | null;
 }
 
 // Statuses that are "Applications" (not yet a deal)
@@ -73,6 +78,13 @@ function getInitials(first: string, last: string) {
   return `${first[0] ?? ''}${last[0] ?? ''}`.toUpperCase();
 }
 
+function splitFullName(fullName: string | undefined, email: string): { first: string; last: string } {
+  const trimmed = (fullName ?? '').trim();
+  if (!trimmed) return { first: email.split('@')[0] ?? email, last: '' };
+  const parts = trimmed.split(/\s+/);
+  return { first: parts[0], last: parts.slice(1).join(' ') };
+}
+
 function aggregateByUser(apps: BorrowerApplication[], authUsers: AuthUserRecord[]): UserRow[] {
   const map = new Map<string, BorrowerApplication[]>();
   apps.forEach((a) => {
@@ -97,11 +109,12 @@ function aggregateByUser(apps: BorrowerApplication[], authUsers: AuthUserRecord[
     const authUser = authUserMap.get(userId);
 
     if (userApps.length === 0 && authUser) {
-      // Auth user with no applications
+      // Auth user with no applications — Auth is authoritative for registered accounts
+      const { first, last } = splitFullName(authUser.full_name, authUser.email);
       rows.push({
         user_id: authUser.id,
-        first_name: authUser.email.split('@')[0] ?? authUser.email,
-        last_name: '',
+        first_name: first,
+        last_name: last,
         email: authUser.email,
         phone: '',
         company_name: null,
@@ -111,6 +124,7 @@ function aggregateByUser(apps: BorrowerApplication[], authUsers: AuthUserRecord[
         lifetimeEmdFunded: 0,
         dateJoined: authUser.created_at,
         latestAppId: '',
+        emailVerified: !!authUser.email_confirmed_at || authUser.email_verified === true,
       });
       return;
     }
@@ -158,6 +172,9 @@ function aggregateByUser(apps: BorrowerApplication[], authUsers: AuthUserRecord[
       lifetimeEmdFunded,
       dateJoined: authUser?.created_at ?? earliest.created_at,
       latestAppId: latest.id,
+      emailVerified: authUser
+        ? !!authUser.email_confirmed_at || authUser.email_verified === true
+        : null,
     });
   });
 
@@ -176,6 +193,7 @@ export default function AdminBorrowersContent() {
   const [applications, setApplications] = useState<BorrowerApplication[]>([]);
   const [authUsers, setAuthUsers] = useState<AuthUserRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   // Map of user_id -> is_disabled
   const [disabledMap, setDisabledMap] = useState<Record<string, boolean>>({});
@@ -184,6 +202,7 @@ export default function AdminBorrowersContent() {
 
   const fetchBorrowers = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [appsResult, accessResult, usersResult] = await Promise.all([
         supabase
@@ -196,15 +215,23 @@ export default function AdminBorrowersContent() {
         supabase
           .from('borrower_access')
           .select('user_id, is_disabled'),
-        fetch('/api/admin/list-users')
-          .then((r) => r.json())
-          .catch(() => ({ users: [] })),
+        // Do NOT swallow failures: a failed Auth lookup must surface as an error,
+        // never as an apparently valid empty user list.
+        fetch('/api/admin/list-users').then(async (r) => {
+          const json = await r.json().catch(() => null);
+          if (!r.ok || !json || !Array.isArray(json.users)) {
+            throw new Error(
+              (json && typeof json.error === 'string' && json.error) ||
+                'Unable to load registered users.'
+            );
+          }
+          return json as { users: AuthUserRecord[] };
+        }),
       ]);
 
       if (appsResult.error) throw appsResult.error;
       setApplications(appsResult.data || []);
-      // Use auth users if available; fall back to empty array (aggregateByUser handles apps-only case)
-      setAuthUsers(Array.isArray((usersResult as any).users) ? (usersResult as any).users : []);
+      setAuthUsers(usersResult.users);
 
       // Build disabled map
       const map: Record<string, boolean> = {};
@@ -212,9 +239,14 @@ export default function AdminBorrowersContent() {
         map[row.user_id] = row.is_disabled;
       });
       setDisabledMap(map);
-    } catch {
+    } catch (err: unknown) {
       setApplications([]);
       setAuthUsers([]);
+      setLoadError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Unable to load borrowers. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -285,6 +317,22 @@ export default function AdminBorrowersContent() {
       </div>
 
       {/* Search Bar */}
+      {loadError && (
+        <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 flex items-start gap-3" role="alert">
+          <Icon name="ExclamationTriangleIcon" size={18} className="text-red-600 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-display font-600 text-red-800">Could not load borrowers</p>
+            <p className="text-xs text-red-700 mt-0.5">{loadError} The list shown below may be incomplete.</p>
+          </div>
+          <button
+            onClick={fetchBorrowers}
+            className="text-xs font-medium text-red-700 hover:text-red-900 underline flex-shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 mb-5">
         <div className="relative">
           <Icon
@@ -318,7 +366,7 @@ export default function AdminBorrowersContent() {
       )}
 
       {/* Table */}
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && loadError ? null : filtered.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-12 text-center">
           <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center mx-auto mb-3">
             <Icon name="UserGroupIcon" size={22} className="text-gray-400" />
@@ -391,6 +439,7 @@ export default function AdminBorrowersContent() {
                             {u.company_name && (
                               <p className="text-xs text-gray-400 truncate">{u.company_name}</p>
                             )}
+                            <EmailStatusBadge verified={u.emailVerified} />
                           </div>
                         </div>
                       </td>
@@ -511,6 +560,7 @@ export default function AdminBorrowersContent() {
                       {u.company_name && (
                         <p className="text-xs text-gray-400 truncate">{u.company_name}</p>
                       )}
+                      <EmailStatusBadge verified={u.emailVerified} />
                     </div>
                     <Icon name="ChevronRightIcon" size={16} className="text-gray-300 flex-shrink-0" />
                   </div>
@@ -602,6 +652,26 @@ export default function AdminBorrowersContent() {
         <p className="text-xs text-gray-400 text-center mt-4">
           {filtered.length} borrower{filtered.length !== 1 ? 's' : ''} displayed
         </p>
+      )}
+    </div>
+  );
+}
+
+// Email Status is derived from Supabase Auth email_confirmed_at and is independent of
+// Portal Link Status and Portal Access (Active/Disabled).
+function EmailStatusBadge({ verified }: { verified: boolean | null }) {
+  if (verified === null) return null;
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <span className="text-[10px] text-gray-400">Email Status:</span>
+      {verified ? (
+        <span className="text-[10px] font-display font-600 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex-shrink-0">
+          Email Verified
+        </span>
+      ) : (
+        <span className="text-[10px] font-display font-600 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex-shrink-0">
+          Pending Email Verification
+        </span>
       )}
     </div>
   );

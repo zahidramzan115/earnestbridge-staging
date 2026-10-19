@@ -138,7 +138,7 @@ const BorrowerProfileContent: React.FC = () => {
   const isDemoId = userId?.startsWith('u') && DEMO_USERS[userId];
 
   const [allApps, setAllApps] = useState<BorrowerApplication[]>([]);
-  const [authUser, setAuthUser] = useState<{ id: string; email: string; created_at: string } | null>(null);
+  const [authUser, setAuthUser] = useState<{ id: string; email: string; full_name?: string; created_at: string; email_verified?: boolean; email_confirmed_at?: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDisabled, setIsDisabled] = useState(false);
   const [accessDialogMode, setAccessDialogMode] = useState<'revoke' | 'reinstate' | null>(null);
@@ -173,18 +173,17 @@ const BorrowerProfileContent: React.FC = () => {
       setAllApps(apps);
       setIsDisabled(accessResult.data?.is_disabled ?? false);
 
-      // If no applications, try to fetch auth user info so we can still show the profile
-      if (apps.length === 0) {
-        try {
-          const res = await fetch('/api/admin/list-users');
-          if (res.ok) {
-            const json = await res.json();
-            const found = (json.users as { id: string; email: string; created_at: string }[])?.find((u) => u.id === userId) ?? null;
-            setAuthUser(found);
-          }
-        } catch {
-          // silently ignore — we'll show what we have
+      // Always fetch the Auth record: Auth (email_confirmed_at) is the authoritative source
+      // for Email Status, and also lets us show the profile when no applications exist.
+      try {
+        const res = await fetch('/api/admin/list-users');
+        if (res.ok) {
+          const json = await res.json();
+          const found = (json.users as { id: string; email: string; full_name?: string; created_at: string; email_verified?: boolean; email_confirmed_at?: string | null }[])?.find((u) => u.id === userId) ?? null;
+          setAuthUser(found);
         }
+      } catch {
+        // silently ignore — we'll show what we have (Email Status is hidden if Auth is unavailable)
       }
     } catch {
       setAllApps([]);
@@ -216,11 +215,16 @@ const BorrowerProfileContent: React.FC = () => {
   // Derived display values — use borrower data if available, fall back to auth user
   const displayEmail = borrower?.email ?? authUser?.email ?? '';
   const displayCreatedAt = borrower?.created_at ?? authUser?.created_at ?? '';
-  const displayFirstName = borrower?.first_name ?? (authUser?.email?.split('@')[0] ?? 'Unknown');
-  const displayLastName = borrower?.last_name ?? '';
+  const authFullNameParts = (authUser?.full_name ?? '').trim().split(/\s+/).filter(Boolean);
+  const displayFirstName = borrower?.first_name ?? (authFullNameParts[0] || (authUser?.email?.split('@')[0] ?? 'Unknown'));
+  const displayLastName = borrower?.last_name ?? authFullNameParts.slice(1).join(' ');
   const displayPhone = borrower?.phone ?? null;
   const displayCompany = borrower?.company_name ?? null;
   const displayIdentityVerified = borrower?.identity_verified ?? false;
+  // Email Status — Auth is authoritative; null when the Auth record is unavailable
+  const emailVerified: boolean | null = authUser
+    ? !!authUser.email_confirmed_at || authUser.email_verified === true
+    : null;
 
   if (loading) {
     return (
@@ -307,6 +311,20 @@ const BorrowerProfileContent: React.FC = () => {
               {displayCompany && <span className="flex items-center gap-1"><Icon name="BuildingOfficeIcon" size={11} />{displayCompany}</span>}
             </div>
             {displayCreatedAt && <p className="text-[11px] text-gray-400 mt-1">Member since {formatDate(displayCreatedAt)}</p>}
+            {emailVerified !== null && !isDemoId && (
+              <div className="flex items-center gap-1.5 mb-1.5 text-xs text-gray-500">
+                <span>Email Status:</span>
+                {emailVerified ? (
+                  <span className="text-[11px] font-display font-600 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Email Verified
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-display font-600 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                    Pending Email Verification
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Actions */}
