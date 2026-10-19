@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { ensurePortalSignupCrmContact } from '@/lib/server/portalSignupCrm';
-import { checkPortalAccess } from '@/lib/server/portalAccess';
 
 /**
  * POST /api/portal/ensure-crm-contact
@@ -15,6 +14,8 @@ import { checkPortalAccess } from '@/lib/server/portalAccess';
  *   - Service-role client required inside the helper (no anon fallback).
  *   - 'backfill' mode: NEVER restores a purged Contact.
  *   - Idempotent; never overwrites a different portal_user_id.
+ *   - Independent of borrower_access: CRM Contact visibility does not depend
+ *     on account-wide Portal Access. Never reads or modifies borrower_access.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -49,15 +50,6 @@ export async function POST(req: NextRequest) {
     }
     if (!user.email_confirmed_at) {
       return NextResponse.json({ ok: true, outcome: 'skipped_unverified' });
-    }
-
-    // A disabled Client performs no portal actions (fail closed).
-    const access = await checkPortalAccess(user.id);
-    if (!access.ok) {
-      return NextResponse.json(
-        { ok: true, outcome: 'skipped_portal_access' },
-        { status: 200 }
-      );
     }
 
     const result = await ensurePortalSignupCrmContact(user, 'backfill');
