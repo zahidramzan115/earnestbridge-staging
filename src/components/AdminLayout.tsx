@@ -18,7 +18,7 @@ interface AdminNavItem {
   badge?: number;
 }
 
-// WORKSPACE — primary CRM destinations
+// WORKSPACE — primary destinations
 const WORKSPACE_NAV: AdminNavItem[] = [
   {
     label: 'Home',
@@ -27,26 +27,28 @@ const WORKSPACE_NAV: AdminNavItem[] = [
     description: 'Overview & KPIs',
   },
   {
-    label: 'Contacts',
-    icon: 'UsersIcon',
-    href: '/admin/crm/contacts',
-    // also highlight when browsing legacy borrower routes
-    matchPrefixes: ['/admin/crm/contacts', '/admin/borrowers', '/admin/borrower'],
-    description: 'Contacts & leads',
-  },
-  {
     label: 'Deals',
     icon: 'BriefcaseIcon',
-    href: '/admin/crm/deals',
-    // also highlight when browsing legacy admin deal routes
-    matchPrefixes: ['/admin/crm/deals', '/admin/deals'],
+    href: '/admin/deals',
+    // Deal detail pages (/admin/borrower/[id]/application/[appId]) also highlight Deals
     description: 'Deals pipeline',
   },
   {
-    label: 'Companies',
-    icon: 'BuildingOfficeIcon',
-    href: '/admin/crm/companies',
-    description: 'Company records',
+    label: 'Clients',
+    icon: 'UsersIcon',
+    href: '/admin/borrowers',
+    matchPrefixes: ['/admin/borrowers', '/admin/borrower'],
+    description: 'Client portal accounts',
+  },
+];
+
+// CRM — contacts, tasks and submissions
+const CRM_NAV: AdminNavItem[] = [
+  {
+    label: 'Contacts',
+    icon: 'UserGroupIcon',
+    href: '/admin/crm/contacts',
+    description: 'CRM contacts & leads',
   },
   {
     label: 'Tasks',
@@ -54,16 +56,16 @@ const WORKSPACE_NAV: AdminNavItem[] = [
     href: '/admin/crm/tasks',
     description: 'Follow-ups & tasks',
   },
-];
-
-// OPERATIONS — secondary / audit views
-const OPERATIONS_NAV: AdminNavItem[] = [
   {
     label: 'Submissions',
     icon: 'InboxArrowDownIcon',
     href: '/admin/crm/submissions',
     description: 'Contact form submissions',
   },
+];
+
+// OPERATIONS — secondary / audit views
+const OPERATIONS_NAV: AdminNavItem[] = [
   {
     label: 'Documents',
     icon: 'DocumentMagnifyingGlassIcon',
@@ -281,6 +283,17 @@ export default function AdminLayout({ children, activePath }: AdminLayoutProps) 
                 activeStyle="workspace"
                 badgeCount={item.href === '/admin/overview' ? submittedCount : 0}
               />
+            </li>
+          ))}
+        </ul>
+
+        {/* ── CRM ── */}
+        <div className="my-3 border-t border-eb-green-800" />
+        <SectionLabel label="CRM" mobile={mobile} />
+        <ul className="space-y-0.5 mb-4">
+          {CRM_NAV.map((item) => (
+            <li key={item.href}>
+              <NavLink item={item} mobile={mobile} activeStyle="workspace" />
             </li>
           ))}
         </ul>

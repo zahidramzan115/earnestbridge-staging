@@ -726,7 +726,7 @@ export default function AdminOverviewContent() {
                   <Icon name="UserPlusIcon" size={14} className="text-gray-400" /> Contact
                 </Link>
                 <Link
-                  href="/admin/crm/deals"
+                  href="/admin/deals"
                   onClick={() => setQuickCreateOpen(false)}
                   className="flex items-center gap-2 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 min-h-[44px]"
                 >
@@ -807,7 +807,7 @@ export default function AdminOverviewContent() {
               </span>
             )}
           </div>
-          <Link href="/admin/applications" className="text-xs text-eb-green-700 font-600 hover:underline flex items-center gap-1">
+          <Link href="/admin/deals" className="text-xs text-eb-green-700 font-600 hover:underline flex items-center gap-1">
             View All Deals <Icon name="ChevronRightIcon" size={12} />
           </Link>
         </div>
@@ -1021,7 +1021,7 @@ export default function AdminOverviewContent() {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-700 text-gray-900 font-display">Recent Deal Status Changes</h2>
-          <Link href="/admin/applications" className="text-xs text-eb-green-700 font-600 hover:underline flex items-center gap-1">
+          <Link href="/admin/deals" className="text-xs text-eb-green-700 font-600 hover:underline flex items-center gap-1">
             View All Deals <Icon name="ChevronRightIcon" size={12} />
           </Link>
         </div>

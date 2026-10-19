@@ -302,7 +302,7 @@ export default function AdminBorrowersContent() {
       {/* Header */}
       <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="font-display font-700 text-gray-900 text-2xl sm:text-3xl">Borrower Management</h1>
+          <h1 className="font-display font-700 text-gray-900 text-2xl sm:text-3xl">Clients</h1>
           <p className="text-sm text-gray-400 mt-1">
             {userRows.length} borrower{userRows.length !== 1 ? 's' : ''} · {applications.filter(a => APPLICATION_STATUSES.includes(a.app_status)).length} application{applications.filter(a => APPLICATION_STATUSES.includes(a.app_status)).length !== 1 ? 's' : ''} · {applications.filter(a => DEAL_STATUSES.includes(a.app_status)).length} deal{applications.filter(a => DEAL_STATUSES.includes(a.app_status)).length !== 1 ? 's' : ''}
           </p>

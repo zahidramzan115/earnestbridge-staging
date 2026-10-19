@@ -3026,7 +3026,7 @@ const BorrowerDetailContent: React.FC = () => {
         <div className="text-center">
           <Icon name="ExclamationTriangleIcon" size={40} className="text-gray-200 mx-auto mb-3" />
           <p className="text-sm text-gray-500 font-600">Application not found</p>
-          <button onClick={() => router.push('/admin')} className="mt-4 text-xs text-eb-green-700 hover:underline">← Back to Applications</button>
+          <button onClick={() => router.push('/admin')} className="mt-4 text-xs text-eb-green-700 hover:underline">← Back to Clients</button>
         </div>
       </div>
     );
@@ -3064,7 +3064,7 @@ const BorrowerDetailContent: React.FC = () => {
           className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors"
         >
           <Icon name="ChevronLeftIcon" size={14} />
-          {borrowerUserId ? `${application.first_name} ${application.last_name}` : 'Back to Borrowers'}
+          {borrowerUserId ? `${application.first_name} ${application.last_name}` : 'Back to Clients'}
         </button>
         <span className="text-gray-300">/</span>
         <span className="text-xs text-gray-400 truncate max-w-[200px]">{application.property_address || `App ${applicationId.slice(0, 8).toUpperCase()}`}</span>

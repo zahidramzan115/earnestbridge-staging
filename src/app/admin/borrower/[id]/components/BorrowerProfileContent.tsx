@@ -231,7 +231,7 @@ const BorrowerProfileContent: React.FC = () => {
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-eb-green-700 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-gray-400">Loading borrower profile…</p>
+          <p className="text-sm text-gray-400">Loading client account…</p>
         </div>
       </div>
     );
@@ -243,8 +243,8 @@ const BorrowerProfileContent: React.FC = () => {
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center">
           <Icon name="ExclamationTriangleIcon" size={40} className="text-gray-200 mx-auto mb-3" />
-          <p className="text-sm text-gray-500 font-600">Borrower not found</p>
-          <button onClick={() => router.push('/admin/borrowers')} className="mt-4 text-xs text-eb-green-700 hover:underline">← Back to Borrowers</button>
+          <p className="text-sm text-gray-500 font-600">Client account not found</p>
+          <button onClick={() => router.push('/admin/borrowers')} className="mt-4 text-xs text-eb-green-700 hover:underline">← Back to Clients</button>
         </div>
       </div>
     );
@@ -259,7 +259,7 @@ const BorrowerProfileContent: React.FC = () => {
           className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors"
         >
           <Icon name="ChevronLeftIcon" size={14} />
-          Back to Borrowers
+          Back to Clients
         </button>
         <span className="text-gray-300">/</span>
         <span className="text-xs text-gray-400 truncate max-w-[200px]">{displayFirstName} {displayLastName}</span>

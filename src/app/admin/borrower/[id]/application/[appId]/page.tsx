@@ -49,7 +49,7 @@ export default function BorrowerApplicationDetailPage() {
   if (!authorized) return null;
 
   return (
-    <AdminLayout activePath="/admin/borrowers">
+    <AdminLayout activePath="/admin/deals">
       <BorrowerDetailContent />
     </AdminLayout>
   );
