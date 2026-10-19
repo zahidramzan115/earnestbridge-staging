@@ -1,10 +1,5 @@
-import AdminLayout from '@/components/AdminLayout';
-import CRMDealsContent from './components/CRMDealsContent';
+import { redirect } from 'next/navigation';
 
 export default function CRMDealsPage() {
-  return (
-    <AdminLayout activePath="/admin/crm/deals">
-      <CRMDealsContent />
-    </AdminLayout>
-  );
+  redirect('/admin/deals');
 }

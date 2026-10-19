@@ -20,7 +20,10 @@ interface BorrowerApplication {
   property_type: string | null;
   purchase_price: number | null;
   deposit_amount: number | null;
+  emd_funded_cents?: number | null;
   due_diligence_days?: number | null;
+  eb_assigned_owner?: string | null;
+  primary_contact_id?: string | null;
   app_status: AppStatus;
   submitted_at: string | null;
   created_at: string;
@@ -34,6 +37,8 @@ interface BorrowerApplication {
   llc_formed?: boolean;
   escrow_funded?: boolean;
   option_exercised?: boolean;
+  crm_contacts?: { id: string; portal_link_status: string | null } | null;
+  crm_deal_contacts?: { contact_id: string }[] | null;
 }
 
 const ALL_STATUSES: AppStatus[] = ['application', 'under_review', 'approved', 'in_progress', 'funded', 'closed', 'rejected'];
@@ -80,6 +85,40 @@ const STATUS_FILTERS: { label: string; value: AppStatus | 'all' | 'application' 
 
 const APPLICATION_STATUSES: AppStatus[] = ['application', 'under_review', 'rejected'];
 const DEAL_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded', 'closed'];
+// Active / non-terminal pipeline Deals (same predicate as CRM Deals "Active Deals"):
+// approved, in_progress, funded. 'closed' and 'rejected' are terminal; 'application'
+// and 'under_review' are pre-deal intake.
+const ACTIVE_PIPELINE_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded'];
+
+const OWNER_OPTIONS = ['All', 'Dan', 'Tucker', 'Eric', 'Unassigned'];
+const PORTAL_FILTERS: { label: string; value: string }[] = [
+  { label: 'All Portal / CRM', value: 'all' },
+  { label: 'Portal Linked', value: 'has_portal' },
+  { label: 'No Portal', value: 'no_portal' },
+  { label: 'No CRM Contact', value: 'no_contact' },
+];
+
+function hasNoCrmContact(d: BorrowerApplication): boolean {
+  return !d.primary_contact_id && (!d.crm_deal_contacts || d.crm_deal_contacts.length === 0);
+}
+
+function isFundedEmd(d: BorrowerApplication): boolean {
+  return d.emd_funded_cents != null && d.emd_funded_cents > 0;
+}
+
+function getTodayETDateStr(offsetDays = 0): string {
+  const base = new Date(Date.now() + offsetDays * 86400000);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(base);
+  const y = parts.find(p => p.type === 'year')?.value ?? '';
+  const m = parts.find(p => p.type === 'month')?.value ?? '';
+  const d = parts.find(p => p.type === 'day')?.value ?? '';
+  return `${y}-${m}-${d}`;
+}
 
 function formatCurrency(value: number | null | undefined): string {
   if (value == null) return '—';
@@ -151,6 +190,9 @@ export default function AdminDealsContent() {
   const [loading, setLoading] = useState(true);
   const [filterValue, setFilterValue] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState<string>('All');
+  const [portalFilter, setPortalFilter] = useState<string>('all');
+  const [hardDateDealIds, setHardDateDealIds] = useState<Set<string>>(new Set());
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const { isSuperAdmin } = useAuth();
@@ -174,19 +216,46 @@ export default function AdminDealsContent() {
     try {
       const { data, error } = await supabase
         .from('borrower_applications')
-        .select('*')
+        .select('*, crm_contacts:primary_contact_id(id, portal_link_status), crm_deal_contacts(contact_id)')
         .is('purged_at', null)
         .order('submitted_at', { ascending: false });
 
       if (error) {
         console.error('Error fetching deals:', error);
         setDeals([]);
+        setHardDateDealIds(new Set());
       } else {
-        setDeals((data as BorrowerApplication[]) || []);
+        const rows = (data as unknown as BorrowerApplication[]) || [];
+        setDeals(rows);
+
+        // Hard dates ≤ 7 days: active option cycle (crm_deal_option_cycles) for funded active Deals
+        const fundedActiveIds = rows
+          .filter(d => ACTIVE_PIPELINE_STATUSES.includes(d.app_status) && isFundedEmd(d))
+          .map(d => d.id);
+        if (fundedActiveIds.length > 0) {
+          const today = getTodayETDateStr(0);
+          const horizon = getTodayETDateStr(7);
+          const { data: cycles, error: cycleError } = await supabase
+            .from('crm_deal_option_cycles')
+            .select('application_id, deposit_goes_hard_date')
+            .in('application_id', fundedActiveIds)
+            .eq('status', 'active')
+            .gte('deposit_goes_hard_date', today)
+            .lte('deposit_goes_hard_date', horizon);
+          if (cycleError) {
+            console.error('Error fetching option cycles:', cycleError);
+            setHardDateDealIds(new Set());
+          } else {
+            setHardDateDealIds(new Set((cycles || []).map((c: { application_id: string }) => c.application_id)));
+          }
+        } else {
+          setHardDateDealIds(new Set());
+        }
       }
     } catch (err) {
       console.error('Unexpected error fetching deals:', err);
       setDeals([]);
+      setHardDateDealIds(new Set());
     } finally {
       setLoading(false);
     }
@@ -315,8 +384,14 @@ export default function AdminDealsContent() {
         (d.company_name || '').toLowerCase().includes(q)
       );
     }
+    if (ownerFilter !== 'All') {
+      data = data.filter(d => (d.eb_assigned_owner || 'Unassigned') === ownerFilter);
+    }
+    if (portalFilter === 'has_portal') data = data.filter(d => d.crm_contacts?.portal_link_status === 'approved');
+    else if (portalFilter === 'no_portal') data = data.filter(d => !d.crm_contacts || d.crm_contacts.portal_link_status === 'none');
+    else if (portalFilter === 'no_contact') data = data.filter(d => hasNoCrmContact(d));
     return data;
-  }, [deals, filterValue, searchQuery]);
+  }, [deals, filterValue, searchQuery, ownerFilter, portalFilter]);
 
   const counts = useMemo(() => ({
     all: deals.length,
@@ -329,8 +404,14 @@ export default function AdminDealsContent() {
     rejected: deals.filter(d => d.app_status === 'rejected').length,
   }), [deals]);
 
-  const totalValue = useMemo(() => deals.filter(d => DEAL_STATUSES.includes(d.app_status)).reduce((s, d) => s + (d.purchase_price ?? 0), 0), [deals]);
-  const totalEMD = useMemo(() => deals.filter(d => DEAL_STATUSES.includes(d.app_status)).reduce((s, d) => s + (d.deposit_amount ?? 0), 0), [deals]);
+  const activeDeals = useMemo(() => deals.filter(d => ACTIVE_PIPELINE_STATUSES.includes(d.app_status)), [deals]);
+  const unfundedActive = useMemo(() => activeDeals.filter(d => !isFundedEmd(d)), [activeDeals]);
+  const fundedActive = useMemo(() => activeDeals.filter(d => isFundedEmd(d)), [activeDeals]);
+  // deposit_amount is stored in DOLLARS
+  const requestedPipeline = useMemo(() => unfundedActive.reduce((s, d) => s + (d.deposit_amount ?? 0), 0), [unfundedActive]);
+  // emd_funded_cents is stored in CENTS → convert to dollars
+  const actualFundedTotal = useMemo(() => fundedActive.reduce((s, d) => s + (d.emd_funded_cents ?? 0), 0) / 100, [fundedActive]);
+  const hardDateCount = useMemo(() => fundedActive.filter(d => hardDateDealIds.has(d.id)).length, [fundedActive, hardDateDealIds]);
 
   if (loading) {
     return (
@@ -368,20 +449,24 @@ export default function AdminDealsContent() {
       {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm">
-          <p className="text-xs text-gray-500 mb-1">Total Deals</p>
-          <p className="text-2xl font-display font-700 text-gray-900">{deals.length}</p>
+          <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Active Deals</p>
+          <p className="text-2xl font-display font-700 text-gray-900">{activeDeals.length}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Approved · In Progress · Funded</p>
         </div>
         <div className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm">
-          <p className="text-xs text-gray-500 mb-1">Applications</p>
-          <p className="text-2xl font-display font-700 text-blue-700">{counts.application}</p>
+          <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Requested EMD Pipeline</p>
+          <p className="text-xl font-display font-700 text-amber-700">{formatCurrency(requestedPipeline)}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">{unfundedActive.length} unfunded Deal{unfundedActive.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm">
-          <p className="text-xs text-gray-500 mb-1">Pipeline Value</p>
-          <p className="text-xl font-display font-700 text-gray-900">{formatCurrency(totalValue)}</p>
+          <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Actual EMD Funded</p>
+          <p className="text-xl font-display font-700 text-emerald-700">{formatCurrency(actualFundedTotal)}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">{fundedActive.length} funded Deal{fundedActive.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm">
-          <p className="text-xs text-gray-500 mb-1">Total EMD</p>
-          <p className="text-xl font-display font-700 text-emerald-700">{formatCurrency(totalEMD)}</p>
+          <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Hard Dates ≤ 7 Days</p>
+          <p className={`text-2xl font-display font-700 ${hardDateCount > 0 ? 'text-red-600' : 'text-gray-900'}`}>{hardDateCount}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Funded Deals · Deposit Goes Hard</p>
         </div>
       </div>
 
@@ -398,22 +483,39 @@ export default function AdminDealsContent() {
               className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900 transition-all"
             />
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {STATUS_FILTERS.map(f => (
-              <button
-                key={f.value}
-                onClick={() => setFilterValue(f.value)}
-                className={`px-3 py-1.5 text-xs font-display font-600 rounded-full border transition-all ${
-                  filterValue === f.value
-                    ? 'bg-eb-green-900 text-white border-eb-green-900' :'bg-white text-gray-600 border-gray-200 hover:border-eb-green-900/40 hover:text-eb-green-900'
-                }`}
-              >
-                {f.label}
-                <span className="ml-1 opacity-60">({counts[f.value as keyof typeof counts] ?? 0})</span>
-              </button>
-            ))}
-          </div>
+          <select
+            value={ownerFilter}
+            onChange={e => setOwnerFilter(e.target.value)}
+            aria-label="Filter by owner"
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none bg-white text-gray-700 focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900"
+          >
+            {OWNER_OPTIONS.map(o => <option key={o} value={o}>{o === 'All' ? 'All Owners' : o}</option>)}
+          </select>
+          <select
+            value={portalFilter}
+            onChange={e => setPortalFilter(e.target.value)}
+            aria-label="Filter by portal or CRM status"
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none bg-white text-gray-700 focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900"
+          >
+            {PORTAL_FILTERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
         </div>
+        <div className="px-4 pt-3 flex flex-wrap gap-1.5">
+          {STATUS_FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setFilterValue(f.value)}
+              className={`px-3 py-1.5 text-xs font-display font-600 rounded-full border transition-all ${
+                filterValue === f.value
+                  ? 'bg-eb-green-900 text-white border-eb-green-900' :'bg-white text-gray-600 border-gray-200 hover:border-eb-green-900/40 hover:text-eb-green-900'
+              }`}
+            >
+              {f.label}
+              <span className="ml-1 opacity-60">({counts[f.value as keyof typeof counts] ?? 0})</span>
+            </button>
+          ))}
+        </div>
+        <div className="pb-3 border-b border-gray-100" />
 
         {filtered.length === 0 ? (
           <div className="py-16 text-center">
@@ -430,11 +532,12 @@ export default function AdminDealsContent() {
                 <tr className="border-b border-gray-100 bg-gray-50/50">
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Borrower</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Property</th>
-                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Value</th>
-                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Due Diligence Period</th>
-                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Stage / Status</th>
+                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Requested EMD</th>
+                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Actual EMD Funded</th>
+                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">DD</th>
+                  <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Stage</th>
                   <th className="text-left px-4 py-3 text-xs font-600 text-gray-500 uppercase tracking-wider">Funding Conditions</th>
-                  <th className="px-4 py-3" />
+                  <th className="px-4 py-3 text-left text-xs font-600 text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -458,20 +561,32 @@ export default function AdminDealsContent() {
                             <div>
                               <p className="font-600 text-gray-900">{deal.first_name} {deal.last_name}</p>
                               <p className="text-xs text-gray-400">{deal.email}</p>
+                              {hasNoCrmContact(deal) && (
+                                <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-600 bg-red-50 text-red-600 border border-red-100">
+                                  No CRM Contact
+                                </span>
+                              )}
                             </div>
                           </div>
                         </td>
                         <td className="px-4 py-3.5">
                           <p className="text-gray-700 max-w-[160px] truncate">{deal.property_address || '—'}</p>
                           <p className="text-xs text-gray-400">{deal.property_type || '—'}</p>
+                          <p className="text-[11px] text-gray-400 tabular-nums">Purchase Price: {formatCurrency(deal.purchase_price)}</p>
                         </td>
                         <td className="px-4 py-3.5">
-                          <p className="font-600 text-gray-900 tabular-nums">{formatCurrency(deal.purchase_price)}</p>
-                          <p className="text-xs text-gray-400 tabular-nums">EMD: {formatCurrency(deal.deposit_amount)}</p>
+                          <p className="font-600 text-amber-700 tabular-nums whitespace-nowrap">{formatCurrency(deal.deposit_amount)}</p>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          {isFundedEmd(deal) ? (
+                            <p className="font-600 text-emerald-700 tabular-nums whitespace-nowrap">{formatCurrency((deal.emd_funded_cents ?? 0) / 100)}</p>
+                          ) : (
+                            <p className="text-gray-400" title="Not funded">—</p>
+                          )}
                         </td>
                         <td className="px-4 py-3.5">
                           <p className="text-sm font-600 whitespace-nowrap text-gray-700">
-                            {deal.due_diligence_days != null ? `${deal.due_diligence_days} ${deal.due_diligence_days === 1 ? 'Day' : 'Days'}` : '—'}
+                            {deal.due_diligence_days != null ? `${deal.due_diligence_days} ${deal.due_diligence_days === 1 ? 'day' : 'days'}` : '—'}
                           </p>
                         </td>
                         <td className="px-4 py-3.5">
@@ -546,7 +661,7 @@ export default function AdminDealsContent() {
 
         <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
           <p className="text-xs text-gray-400">{filtered.length} deal{filtered.length !== 1 ? 's' : ''}</p>
-          <p className="text-xs text-gray-400">Pipeline: <span className="font-600 text-gray-600">{formatCurrency(totalValue)}</span></p>
+          <p className="text-xs text-gray-400">Requested EMD Pipeline: <span className="font-600 text-gray-600">{formatCurrency(requestedPipeline)}</span></p>
         </div>
       </div>
 

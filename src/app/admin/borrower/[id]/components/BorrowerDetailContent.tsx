@@ -13,6 +13,7 @@ import DealDeadlinesSection from './DealDeadlinesSection';
 import FundingOptionSection from './FundingOptionSection';
 import FundingBillingSection from './FundingBillingSection';
 import DealInvoicesSection from './DealInvoicesSection';
+import DealCrmContactsSection from './DealCrmContactsSection';
 import EmailAttachmentPicker, { AttachmentDescriptor, cleanupAttachments } from '@/components/EmailAttachmentPicker';
 
 type AppStatus = 'draft' | 'application' | 'submitted' | 'under_review' | 'in_review' | 'approved' | 'conditionally_approved' | 'in_progress' | 'funded' | 'closed' | 'rejected' | 'expired';
@@ -3632,6 +3633,38 @@ const BorrowerDetailContent: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* CRM Contacts */}
+            <DealCrmContactsSection
+              dealId={applicationId}
+              isMockId={isMockId}
+              onUpdated={async () => {
+                if (isMockId) return;
+                const { data: fresh } = await supabase
+                  .from('borrower_applications')
+                  .select('primary_contact_id')
+                  .eq('id', applicationId)
+                  .maybeSingle();
+                const primaryId = (fresh as { primary_contact_id: string | null } | null)?.primary_contact_id ?? null;
+                const { data: dcs } = await supabase
+                  .from('crm_deal_contacts')
+                  .select('contact_id, role')
+                  .eq('deal_id', applicationId);
+                const rows = (dcs as { contact_id: string; role: string }[] | null) ?? [];
+                setAdditionalContactCount(rows.filter(r => r.role !== 'primary').length);
+                const headerId = primaryId ?? rows[0]?.contact_id ?? null;
+                if (headerId) {
+                  const { data: c } = await supabase
+                    .from('crm_contacts')
+                    .select('id, first_name, last_name, primary_email, phone, portal_link_status')
+                    .eq('id', headerId)
+                    .maybeSingle();
+                  setCrmContact((c as CrmContact | null) ?? null);
+                } else {
+                  setCrmContact(null);
+                }
+              }}
+            />
           </div>
 
           {/* Right: Status update + borrower info */}
