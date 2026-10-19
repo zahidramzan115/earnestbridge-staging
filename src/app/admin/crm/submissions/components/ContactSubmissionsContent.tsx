@@ -1,6 +1,7 @@
 'use client';
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import Icon from '@/components/ui/AppIcon';
 import Link from 'next/link';
 
@@ -106,13 +107,79 @@ function formatCurrency(v: number | null) {
 
 // ─── Submission Detail Drawer ─────────────────────────────────────────────────
 
-function SubmissionDrawer({ submission, onClose }: { submission: Submission; onClose: () => void }) {
+interface SubmissionDrawerProps {
+  submission: Submission;
+  onClose: () => void;
+  canPurge: boolean;
+  onPurged: (id: string) => void;
+}
+
+function SubmissionDrawer({ submission, onClose, canPurge, onPurged }: SubmissionDrawerProps) {
   const contact = submission.crm_contacts;
   const portalBadge = PORTAL_BADGES[contact?.portal_link_status || 'none'];
 
+  const [showPurge, setShowPurge] = useState(false);
+  const [purgeReason, setPurgeReason] = useState('');
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [purging, setPurging] = useState(false);
+  const [purgeError, setPurgeError] = useState<string | null>(null);
+  const purgeLockRef = useRef(false);
+
+  const handleClose = () => {
+    if (purgeLockRef.current) return;
+    onClose();
+  };
+
+  const closePurgeDialog = () => {
+    if (purgeLockRef.current) return;
+    setShowPurge(false);
+    setPurgeReason('');
+    setPurgeConfirmText('');
+    setPurgeError(null);
+  };
+
+  const handlePurge = async () => {
+    if (purgeLockRef.current) return;
+    const reason = purgeReason.trim();
+    if (!reason || purgeConfirmText !== 'PURGE') return;
+    purgeLockRef.current = true;
+    setPurging(true);
+    setPurgeError(null);
+    let succeeded = false;
+    try {
+      const res = await fetch(`/api/admin/contact-submissions/${submission.id}/purge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purge_reason: reason }),
+      });
+      if (res.ok) {
+        succeeded = true;
+      } else if (res.status === 401) {
+        setPurgeError('Your session has expired. Please sign in again.');
+      } else if (res.status === 403) {
+        setPurgeError('Only a SuperAdmin can purge a Contact Submission.');
+      } else if (res.status === 404) {
+        setPurgeError('This submission could not be found. It may have already been removed.');
+      } else if (res.status === 400) {
+        const j = await res.json().catch(() => null);
+        setPurgeError(j?.error || 'Invalid request.');
+      } else {
+        setPurgeError('Something went wrong while purging the submission. Please try again.');
+      }
+    } catch {
+      setPurgeError('Network error. Please check your connection and try again.');
+    } finally {
+      purgeLockRef.current = false;
+      setPurging(false);
+    }
+    if (succeeded) {
+      onPurged(submission.id);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex">
-      <div className="flex-1 bg-black/40" onClick={onClose} />
+      <div className="flex-1 bg-black/40" onClick={handleClose} />
       <div className="w-full max-w-xl bg-white shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
@@ -120,9 +187,24 @@ function SubmissionDrawer({ submission, onClose }: { submission: Submission; onC
             <h2 className="text-base font-700 text-gray-900 font-display">Submission Detail</h2>
             <p className="text-xs text-gray-500 mt-0.5">{formatDateTime(submission.submitted_at)}</p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors">
-            <Icon name="XMarkIcon" size={18} className="text-gray-500" />
-          </button>
+          <div className="flex items-center gap-2">
+            {canPurge && (
+              <button
+                onClick={() => setShowPurge(true)}
+                disabled={purging}
+                className="px-3 py-1.5 rounded-lg text-xs font-600 border border-red-200 text-red-700 bg-white hover:bg-red-50 transition-colors disabled:opacity-50"
+              >
+                Purge Submission
+              </button>
+            )}
+            <button
+              onClick={handleClose}
+              disabled={purging}
+              className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+            >
+              <Icon name="XMarkIcon" size={18} className="text-gray-500" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
@@ -206,6 +288,65 @@ function SubmissionDrawer({ submission, onClose }: { submission: Submission; onC
           )}
         </div>
       </div>
+
+      {/* Purge confirmation dialog (SuperAdmin only) */}
+      {canPurge && showPurge && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-6 space-y-4">
+            <div>
+              <h3 className="text-base font-700 text-red-700 font-display">Purge Contact Submission</h3>
+              <p className="text-sm text-gray-600 mt-2">
+                This will hide the submission from all Admin views and future Analytics. The record
+                is retained in the database for audit purposes. The CRM Contact, any Deals and
+                Client Portal access are not affected. This action cannot be undone from the Admin UI.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-600 text-gray-600 mb-1">Reason for purge (required)</label>
+              <textarea
+                value={purgeReason}
+                onChange={e => setPurgeReason(e.target.value)}
+                disabled={purging}
+                maxLength={1000}
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400 disabled:bg-gray-50"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-600 text-gray-600 mb-1">
+                Type <span className="font-700">PURGE</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={purgeConfirmText}
+                onChange={e => setPurgeConfirmText(e.target.value)}
+                disabled={purging}
+                autoComplete="off"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400 disabled:bg-gray-50"
+              />
+            </div>
+            {purgeError && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{purgeError}</p>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={closePurgeDialog}
+                disabled={purging}
+                className="px-4 py-2 rounded-lg text-sm font-600 border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePurge}
+                disabled={purging || !purgeReason.trim() || purgeConfirmText !== 'PURGE'}
+                className="px-4 py-2 rounded-lg text-sm font-600 bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {purging ? 'Purging…' : 'Purge Submission'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -224,6 +365,8 @@ function Row({ label, value }: { label: string; value: string | null | undefined
 
 export default function ContactSubmissionsContent() {
   const supabase = createClient();
+  const { isSuperAdmin } = useAuth();
+  const canPurge = isSuperAdmin();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
@@ -239,6 +382,7 @@ export default function ContactSubmissionsContent() {
     promoCode: '',
     view: 'all',
   });
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -248,6 +392,7 @@ export default function ContactSubmissionsContent() {
         *,
         crm_contacts(id, first_name, last_name, lead_status, assigned_owner, portal_link_status)
       `)
+      .is('purged_at', null)
       .order('submitted_at', { ascending: false })
       .limit(500);
 
@@ -258,6 +403,12 @@ export default function ContactSubmissionsContent() {
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const setView = (view: FilterState['view']) => {
     setFilters(f => ({ ...f, view, dateFrom: '', dateTo: '' }));
@@ -299,6 +450,12 @@ export default function ContactSubmissionsContent() {
       return true;
     });
   }, [submissions, filters]);
+
+  const handlePurged = useCallback((id: string) => {
+    setSubmissions(prev => prev.filter(s => s.id !== id));
+    setSelectedSubmission(null);
+    setToast('Submission purged. It is now hidden from Admin views.');
+  }, []);
 
   const VIEW_TABS = [
     { key: 'all',        label: 'All Submissions' },
@@ -545,7 +702,15 @@ export default function ContactSubmissionsContent() {
         <SubmissionDrawer
           submission={selectedSubmission}
           onClose={() => setSelectedSubmission(null)}
+          canPurge={canPurge}
+          onPurged={handlePurged}
         />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[70] px-4 py-3 rounded-lg bg-gray-900 text-white text-sm shadow-lg">
+          {toast}
+        </div>
       )}
     </div>
   );

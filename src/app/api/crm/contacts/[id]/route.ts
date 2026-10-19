@@ -98,6 +98,7 @@ export async function GET(
     .from('crm_contact_submissions')
     .select('*')
     .eq('contact_id', id)
+    .is('purged_at', null)
     .order('submitted_at', { ascending: false });
 
   return NextResponse.json({ contact, activities, tasks, submissions });

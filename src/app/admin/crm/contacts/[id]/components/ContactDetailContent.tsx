@@ -425,7 +425,7 @@ export default function ContactDetailContent({ contactId }: { contactId: string 
     const results = await Promise.all([
       supabase.from('crm_activities').select('*').eq('contact_id', contactId).order('created_at', { ascending: false }).limit(100),
       supabase.from('crm_tasks').select('*').eq('contact_id', contactId).order('due_date', { ascending: true }),
-      supabase.from('crm_contact_submissions').select('*').eq('contact_id', contactId).order('submitted_at', { ascending: false }),
+      supabase.from('crm_contact_submissions').select('*').eq('contact_id', contactId).is('purged_at', null).order('submitted_at', { ascending: false }),
     ]);
 
     setActivities((results[0].data as Activity[]) || []);
