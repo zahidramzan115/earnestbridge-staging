@@ -89,8 +89,9 @@ const DEAL_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded', 'closed
 // approved, in_progress, funded. 'closed' and 'rejected' are terminal; 'application'
 // and 'under_review' are pre-deal intake.
 const ACTIVE_PIPELINE_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded'];
-// Pipeline statuses whose requested EMD has not yet been funded (same non-terminal set)
-const REQUESTED_EMD_PIPELINE_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded'];
+// Requested EMD Pipeline stages (independent of Active Deals): unfunded upcoming EMD demand.
+// Sourced from the full non-purged Deal list, NOT from activeDeals.
+const REQUESTED_EMD_PIPELINE_STATUSES: AppStatus[] = ['application', 'under_review', 'approved', 'in_progress'];
 
 const OWNER_OPTIONS = ['All', 'Dan', 'Tucker', 'Eric', 'Unassigned'];
 const PORTAL_FILTERS: { label: string; value: string }[] = [
