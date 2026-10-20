@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server';
+import { checkAdmin } from '@/lib/server/adminAuth';
 
 // POST /api/send-status-email
 // Called when an application status is updated to notify the borrower AND admin.
 // Body: { borrowerEmail, borrowerFirstName, borrowerLastName, newStatus, propertyAddress, milestoneLabel?, message? }
 
 export async function POST(request: Request) {
+  // Admin-only: 401 when unauthenticated, 403 when authenticated but not Admin
+  const adminCheck = await checkAdmin();
+  if (!adminCheck.ok) {
+    return NextResponse.json(
+      { error: adminCheck.status === 401 ? 'Unauthorized.' : 'Forbidden.' },
+      { status: adminCheck.status }
+    );
+  }
+
   try {
     const body = await request.json();
     const {

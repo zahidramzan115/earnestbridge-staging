@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { checkAdmin } from '@/lib/server/adminAuth';
 
 // POST /api/send-document-review-email
 // Called when an admin approves, rejects, or requests resubmission of a borrower document.
@@ -6,6 +7,15 @@ import { NextResponse } from 'next/server';
 // action: 'approved' | 'rejected' | 'resubmit_requested'
 
 export async function POST(request: Request) {
+  // Admin-only: 401 when unauthenticated, 403 when authenticated but not Admin
+  const adminCheck = await checkAdmin();
+  if (!adminCheck.ok) {
+    return NextResponse.json(
+      { error: adminCheck.status === 401 ? 'Unauthorized.' : 'Forbidden.' },
+      { status: adminCheck.status }
+    );
+  }
+
   try {
     const body = await request.json();
     const {

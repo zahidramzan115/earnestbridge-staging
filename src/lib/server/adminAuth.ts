@@ -54,6 +54,28 @@ export async function requireAdmin(): Promise<User | null> {
 }
 
 /**
+ * Same Admin check as requireAdmin(), but distinguishes the failure reason so
+ * routes can return 401 (no session) vs 403 (authenticated, not Admin).
+ *
+ * Authorization is based SOLELY on app_metadata.role === 'admin'.
+ */
+export type AdminCheckResult =
+  | { ok: true; user: User }
+  | { ok: false; status: 401 | 403 };
+
+export async function checkAdmin(): Promise<AdminCheckResult> {
+  const supabase = await buildServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { ok: false, status: 401 };
+
+  const isAdmin = user.app_metadata?.role === 'admin';
+  return isAdmin ? { ok: true, user } : { ok: false, status: 403 };
+}
+
+/**
  * Require an authenticated SuperAdmin user.
  *
  * SuperAdmin is an ADDITIONAL privilege on top of Admin.
