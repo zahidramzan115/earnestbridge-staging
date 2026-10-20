@@ -1611,6 +1611,25 @@ export async function POST(request: Request) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action');
 
+  // ── RETIRED TEST MODES (Phase 7H-5E2) ─────────────────────────────────────
+  // live_auto_close_test and live_closeout_recovery_test depended on the
+  // superseded automatic Funded → Closed Deal model. Following the Option Cycle /
+  // Deal status decoupling (7H-5C), they are retired. This guard runs after
+  // requireAdmin and before any DB client creation, writes, RPC calls, or email.
+  if (action === 'live_auto_close_test' || action === 'live_closeout_recovery_test') {
+    return NextResponse.json(
+      {
+        error: 'Gone',
+        retired: true,
+        action,
+        message:
+          `The '${action}' test mode has been retired. It depended on the previous automatic ` +
+          'Funded → Closed Deal status model, which was removed when Option Cycle status was '+ 'decoupled from Deal status. A missed Option Cycle now only marks the cycle as missed; '+ 'it does not change the Deal status. No database writes, RPC calls, or emails were performed.',
+      },
+      { status: 410 }
+    );
+  }
+
   const supabase = getServiceClient();
 
   // ── action=set_funded ─────────────────────────────────────────────────────

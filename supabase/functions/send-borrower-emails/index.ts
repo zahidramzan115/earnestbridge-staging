@@ -607,7 +607,6 @@ serve(async (req) => {
     else if (emailType === "admin_deadline_reminder") {
       toEmail = [ADMIN_EMAIL];
       const daysLeft = application?.daysUntilClosing ?? 0;
-      const daysUntilOptionExpires = application?.daysUntilOptionExpires ?? Math.max(0, daysLeft - 2);
       const urgencyColor = daysLeft <= 2 ? "#dc2626" : daysLeft <= 5 ? "#d97706" : "#2563eb";
       const urgencyBg = daysLeft <= 2 ? "#fef2f2" : daysLeft <= 5 ? "#fffbeb" : "#eff6ff";
       const urgencyBorder = daysLeft <= 2 ? "#fecaca" : daysLeft <= 5 ? "#fde68a" : "#bfdbfe";
@@ -625,7 +624,7 @@ serve(async (req) => {
                 ${daysLeft === 0 ? "⚠️ Closing Date is TODAY" : daysLeft === 1 ? "⚠️ Closing Date is TOMORROW" : `⏰ ${daysLeft} Days Until Closing`}
               </p>
               ${application?.closingDate ? `<p style="margin: 10px 0 0; font-size: 20px; font-weight: 800; color: #111827;">${application.closingDate}</p>` : ""}
-              <p style="margin: 8px 0 0; font-size: 13px; color: ${urgencyColor}; font-weight: 600;">Option period expires in ${daysUntilOptionExpires} day${daysUntilOptionExpires !== 1 ? "s" : ""}</p>
+              <p style="margin: 8px 0 0; font-size: 13px; color: ${urgencyColor}; font-weight: 600;">Option Exercise Deadline: Review the active Option Cycle in the Admin Dashboard for the authoritative deadline.</p>
             </div>
 
             <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 16px 0;">
@@ -1163,7 +1162,7 @@ serve(async (req) => {
               You can reach us at <a href="mailto:admin@earnestbridge.com" style="color: #1B4332; font-weight: 600;">admin@earnestbridge.com</a>.
             </p>
 
-            <a href="${appUrl}/deadlines" style="${btnStyle}">Contact EarnestBridge →</a>
+            <a href="${appUrl}/deadlines" style="${btnStyle}">View My Deadlines →</a>
 
             <p style="margin-top: 28px; color: #374151;">Best regards,<br/><strong>The EarnestBridge Team</strong></p>
 
