@@ -659,13 +659,14 @@ function HistoricalCycleRow({ cycle }: { cycle: OptionCycle }) {
 
 interface ExtensionOverrideModalProps {
   missedCycle: OptionCycle;
+  isDealFunded: boolean;
   onSubmit: (hardDate: string, attestation: boolean) => void;
   onCancel: () => void;
   loading?: boolean;
   error?: string | null;
 }
 
-function ExtensionOverrideModal({ missedCycle, onSubmit, onCancel, loading, error }: ExtensionOverrideModalProps) {
+function ExtensionOverrideModal({ missedCycle, isDealFunded, onSubmit, onCancel, loading, error }: ExtensionOverrideModalProps) {
   const [hardDate, setHardDate] = useState('');
   const [attested, setAttested] = useState(false);
 
@@ -681,7 +682,7 @@ function ExtensionOverrideModal({ missedCycle, onSubmit, onCancel, loading, erro
           <div>
             <h3 className="font-display font-700 text-sm text-gray-900">Accept Extension Override</h3>
             <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-              This action is for missed cycles only. The prior missed cycle will be preserved. A new active cycle will be created and the Deal will be reopened (Closed → Funded).
+              The previous Option Cycle remains missed. A new active Option Cycle will be created, and the new Deposit Goes Hard Date will set a new Option Exercise Deadline. Deal status is not changed by this action.
             </p>
           </div>
         </div>
@@ -704,6 +705,13 @@ function ExtensionOverrideModal({ missedCycle, onSubmit, onCancel, loading, erro
           <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
             <Icon name="ExclamationTriangleIcon" size={13} className="flex-shrink-0 mt-0.5" />
             <span><strong>Extension Fee Outstanding</strong> — override may proceed, but fee must be collected.</span>
+          </div>
+        )}
+
+        {!isDealFunded && (
+          <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+            <Icon name="ExclamationTriangleIcon" size={13} className="flex-shrink-0 mt-0.5" />
+            <span>Set the Deal status to Funded before creating an extension.</span>
           </div>
         )}
 
@@ -744,8 +752,8 @@ function ExtensionOverrideModal({ missedCycle, onSubmit, onCancel, loading, erro
         <div className="flex gap-3 pt-1">
           <button onClick={onCancel} disabled={loading} className="flex-1 px-4 py-2.5 text-xs font-display font-600 text-gray-600 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 transition-all disabled:opacity-50">Cancel</button>
           <button
-            onClick={() => hardDate && attested && onSubmit(hardDate, attested)}
-            disabled={!hardDate || !attested || loading}
+            onClick={() => isDealFunded && hardDate && attested && onSubmit(hardDate, attested)}
+            disabled={!isDealFunded || !hardDate || !attested || loading}
             className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-display font-700 text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? <Icon name="ArrowPathIcon" size={13} className="animate-spin" /> : null}
@@ -938,6 +946,7 @@ const FundingOptionSection: React.FC<FundingOptionSectionProps> = ({
     // Find the missed cycle to override
     const missedCycle = cycles.find((c) => c.status === 'missed');
     if (!missedCycle) return;
+    if (!isFunded) { setOverrideError('Set the Deal status to Funded before creating an extension.'); return; }
     if (isMockId) { setShowOverrideModal(false); return; }
     setActionLoading('extension_override');
     setOverrideError(null);
@@ -952,7 +961,7 @@ const FundingOptionSection: React.FC<FundingOptionSectionProps> = ({
         }),
       });
       const json = await res.json();
-      if (!res.ok) { setOverrideError(json.error ?? 'Override failed'); return; }
+      if (!res.ok) { setOverrideError(json.message ?? json.error ?? 'Override failed'); return; }
       setShowOverrideModal(false);
       await loadCycles();
     } catch {
@@ -1099,9 +1108,15 @@ const FundingOptionSection: React.FC<FundingOptionSectionProps> = ({
                       <span>Extension Fee Outstanding</span>
                     </div>
                   )}
+                  {!isFunded && (
+                    <div className="flex items-start gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <Icon name="InformationCircleIcon" size={12} className="flex-shrink-0 mt-0.5" />
+                      <span>Set the Deal status to Funded before creating an extension.</span>
+                    </div>
+                  )}
                   <button
                     onClick={() => { setOverrideError(null); setShowOverrideModal(true); }}
-                    disabled={!!actionLoading}
+                    disabled={!!actionLoading || !isFunded}
                     className="flex items-center gap-1.5 px-3 py-2 text-xs font-display font-700 text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-all disabled:opacity-50 min-h-[36px]"
                   >
                     {actionLoading === 'extension_override' ? <Icon name="ArrowPathIcon" size={12} className="animate-spin" /> : <Icon name="ShieldCheckIcon" size={12} />}
@@ -1189,6 +1204,7 @@ const FundingOptionSection: React.FC<FundingOptionSectionProps> = ({
         return (
           <ExtensionOverrideModal
             missedCycle={missedCycle}
+            isDealFunded={isFunded}
             onSubmit={handleExtensionOverride}
             onCancel={() => { setShowOverrideModal(false); setOverrideError(null); }}
             loading={actionLoading === 'extension_override'}

@@ -726,12 +726,12 @@ export async function PATCH(request: Request) {
 
   // ── Action: extension_override ──────────────────────────────────────────────
   //
-  // MANUAL EXTENSION OVERRIDE — for missed cycles after auto-close.
+  // MANUAL EXTENSION OVERRIDE — for missed cycles.
   //
   // This is SEPARATE from the normal 'new_extension' workflow.
   // Only available when:
   //   - current/prior cycle status = 'missed'
-  //   - Deal is currently 'closed'
+  //   - Deal is not purged and currently 'funded'
   //   - actual_amendment_received_at IS NOT NULL
   //   - Admin provides explicit attestation
   //   - Admin provides new Deposit Goes Hard Date
@@ -741,12 +741,14 @@ export async function PATCH(request: Request) {
   //   2. Verifies missed cycle
   //   3. Verifies actual amendment timestamp exists
   //   4. Requires Admin attestation
-  //   5. Calculates NEW Option Exercise Deadline
-  //   6. Leaves prior cycle: status = missed (NEVER rewritten)
-  //   7. Creates new cycle: cycle_number = previous + 1, status = active
-  //   8. Deal: Closed → Funded
-  //   9. Logs extension_override_accepted
-  //   10. Logs status_change
+  //   5. Requires Deal to already be 'funded' (never changes Deal status)
+  //   6. Calculates NEW Option Exercise Deadline
+  //   7. Leaves prior cycle: status = missed (NEVER rewritten)
+  //   8. Creates new cycle: cycle_number = previous + 1, status = active
+  //   9. Logs extension_override_accepted (Option Cycle only)
+  //
+  // Deal status is NOT changed by this action. Deal status changes are manual
+  // Admin decisions through the canonical Deal Status API.
   //
   // Extension fee may still be pending — does NOT block override.
   // Admin UI shows "Extension Fee Outstanding" until recorded paid.
@@ -787,7 +789,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'deposit_goes_hard_date must be in YYYY-MM-DD format' }, { status: 422 });
     }
 
-    // Verify Deal is currently closed
+    // Verify Deal exists, is not purged, and is currently funded
     const { data: dealForOverride } = await supabase
       .from('borrower_applications')
       .select('app_status, user_id')
@@ -799,9 +801,12 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
     }
 
-    if (dealForOverride.app_status !== 'closed') {
+    if (dealForOverride.app_status !== 'funded') {
       return NextResponse.json(
-        { error: `Extension override requires Deal status 'closed'. Current status: '${dealForOverride.app_status}'.` },
+        {
+          error: 'deal_not_funded',
+          message: 'Set the Deal status to Funded before creating an extension.',
+        },
         { status: 422 }
       );
     }
@@ -841,33 +846,12 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
 
-    // Reopen Deal: Closed → Funded
-    const { error: dealReopenError } = await supabase
-      .from('borrower_applications')
-      .update({ app_status: 'funded' })
-      .eq('id', applicationId);
-
-    if (dealReopenError) {
-      // Rollback new cycle
-      await supabase.from('crm_deal_option_cycles').delete().eq('id', newCycle.id);
-      return NextResponse.json({ error: `Failed to reopen Deal: ${dealReopenError.message}` }, { status: 500 });
-    }
-
-    // Log extension_override_accepted
+    // Log extension_override_accepted (Option Cycle action only — Deal status untouched)
     await logActivity(
       applicationId, dealForOverride.user_id ?? null,
       'extension_override_accepted',
-      `Extension override accepted — new hard date: ${formatDateForActivity(overrideHardDate)}`,
-      `Admin verified signed PSA amendment was received before DD period expired. Prior cycle ${current.cycle_number} remains 'missed'. New cycle ${newCycle.cycle_number} created. New Option Exercise Deadline: ${formatDateForActivity(newOptionDeadline)}. Deal reopened: Closed → Funded.`,
-      admin.email || 'EarnestBridge Admin'
-    );
-
-    // Log status_change
-    await logActivity(
-      applicationId, dealForOverride.user_id ?? null,
-      'status_change',
-      'Deal status changed: Closed → Funded',
-      `Manual extension override accepted by Admin. New extension cycle created.`,
+      `Extension override accepted — new Option Cycle created (hard date: ${formatDateForActivity(overrideHardDate)})`,
+      `Admin verified signed PSA amendment was received before DD period expired. Prior cycle ${current.cycle_number} remains 'missed'. New cycle ${newCycle.cycle_number} created. New Option Exercise Deadline: ${formatDateForActivity(newOptionDeadline)}.`,
       admin.email || 'EarnestBridge Admin'
     );
 

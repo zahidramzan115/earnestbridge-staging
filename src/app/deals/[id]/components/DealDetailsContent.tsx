@@ -59,7 +59,7 @@ interface PortalOptionCycle {
 }
 
 const DEADLINE_NOT_MET_DESCRIPTION =
-  'The Option Exercise Deadline was not completed, so this deal has been closed in EarnestBridge. Contact EarnestBridge if you believe required extension documentation was submitted.';
+  'The Option Exercise Deadline was not met. Please contact EarnestBridge for next steps.';
 
 const OPTION_STATUS_UI: Record<PortalOptionStatus, { label: string; chip: string; guidance: string }> = {
   action_required: {
@@ -687,9 +687,10 @@ export default function DealDetailsContent() {
   if (!deal) return null;
 
   const baseCfg = STATUS_CONFIG[deal.app_status] ?? STATUS_CONFIG.approved;
-  // Only a closed Deal with a missed option cycle gets the "Deadline Not Met" presentation.
+  // A missed Option Cycle (deadline_not_met) drives the "Deadline Not Met" presentation,
+  // independent of Deal status.
   const cfg =
-    deal.app_status === 'closed' && optionCycle?.client_status === 'deadline_not_met'
+    optionCycle?.client_status === 'deadline_not_met'
       ? { ...baseCfg, label: 'Deadline Not Met', description: DEADLINE_NOT_MET_DESCRIPTION }
       : baseCfg;
   const dealLabel = deal.company_name || deal.property_address || `Deal ${deal.id.slice(0, 6)}`;
