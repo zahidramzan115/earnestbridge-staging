@@ -170,7 +170,7 @@ function OptionCycleCard({ item }: { item: DisplayDeadline }) {
           <p className="text-sm font-display font-700 text-gray-700">{item.optionCutoffDisplay}</p>
         </div>
         <p className="text-[11px] text-gray-600 leading-relaxed">
-          The Option Exercise Deadline was not completed, so this deal has been closed in EarnestBridge. Contact EarnestBridge if you believe required extension documentation was submitted.
+          The Option Exercise Deadline has passed, and this Option Cycle has been marked missed. Please contact EarnestBridge regarding next steps.
         </p>
       </div>
     );

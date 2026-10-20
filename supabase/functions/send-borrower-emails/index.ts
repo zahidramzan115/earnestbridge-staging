@@ -1143,22 +1143,22 @@ serve(async (req) => {
       const dealName = application?.dealDisplayName || application?.propertyAddress || "your deal";
       const deadlineDisplay = application?.optionDeadlineDisplay || application?.optionExerciseDeadline || "the Option Exercise Deadline";
 
-      subject = "Important Notice: EarnestBridge Deal Closed — EarnestBridge";
+      subject = "Option Exercise Deadline Missed — EarnestBridge";
       htmlBody = `
         <div style="${baseStyle}">
           ${brandedHeader}
           <div style="${bodyStyle}">
-            <h2 style="color: #1B4332; margin-top: 0; font-size: 20px;">Deal Closed — Option Exercise Deadline Not Met</h2>
+            <h2 style="color: #1B4332; margin-top: 0; font-size: 20px;">Your Option Exercise Deadline Has Passed</h2>
             <p style="color: #374151; line-height: 1.7;">Hi ${borrower.firstName || "there"},</p>
 
             <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #dc2626; border-radius: 8px; padding: 20px; margin: 28px 0;">
-              <p style="margin: 0; font-size: 15px; font-weight: 700; color: #991b1b;">Your EarnestBridge deal has been closed because the Option Exercise Deadline was not met.</p>
+              <p style="margin: 0; font-size: 15px; font-weight: 700; color: #991b1b;">The Option Exercise Deadline was not met, and the associated Option Cycle has been marked missed.</p>
               ${application?.propertyAddress ? `<p style="margin: 10px 0 0; font-size: 13px; color: #6b7280;">${application.propertyAddress}</p>` : ""}
               <p style="margin: 10px 0 0; font-size: 13px; color: #6b7280;">Option Exercise Deadline: <strong>${deadlineDisplay}</strong></p>
             </div>
 
             <p style="color: #374151; line-height: 1.7;">
-              <strong>Please contact EarnestBridge immediately if you believe required extension documentation was submitted.</strong>
+              <strong>Please contact EarnestBridge regarding next steps.</strong> If you believe required extension documentation was submitted, let us know right away.
             </p>
 
             <p style="color: #374151; line-height: 1.7;">
@@ -1185,16 +1185,16 @@ serve(async (req) => {
       const hardDate = application?.depositGoesHardDate || "—";
       const assignedOwner = application?.assignedOwner || "Unassigned";
 
-      subject = `[Admin] Deal Auto-Closed — Option Deadline Missed — ${dealName} | EarnestBridge`;
+      subject = `[Admin] Option Exercise Deadline Missed — ${dealName} | EarnestBridge`;
       htmlBody = `
         <div style="${baseStyle}">
-          ${adminBrandedHeader("DEAL AUTO-CLOSED")}
+          ${adminBrandedHeader("OPTION CYCLE MARKED MISSED")}
           <div style="${bodyStyle}">
-            <h2 style="color: #173F35; margin-top: 0; font-size: 20px;">CRM Deal Auto-Closed — Option Deadline Missed</h2>
-            <p style="color: #374151; line-height: 1.7;">The following deal has been automatically closed by the CRM because the Option Exercise Deadline passed with no timely exercise or signed amendment recorded.</p>
+            <h2 style="color: #173F35; margin-top: 0; font-size: 20px;">Option Cycle Marked Missed — Option Exercise Deadline Passed</h2>
+            <p style="color: #374151; line-height: 1.7;">The Option Cycle for the following deal was marked missed because the Option Exercise Deadline passed with no timely exercise or signed amendment recorded. The automation did not modify the Deal status; the Deal remains subject to a separate Admin status decision.</p>
 
             <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #dc2626; border-radius: 8px; padding: 20px; margin: 28px 0;">
-              <h3 style="color: #991b1b; margin: 0 0 14px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.05em;">Closed Deal</h3>
+              <h3 style="color: #991b1b; margin: 0 0 14px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.05em;">Missed Option Cycle</h3>
               <table style="width: 100%; border-collapse: collapse;">
                 <tr><td style="padding: 7px 0; color: #6b7280; width: 45%; font-size: 14px;">Deal</td><td style="padding: 7px 0; font-weight: 700; font-size: 14px;">${dealName}</td></tr>
                 ${application?.propertyAddress ? `<tr><td style="padding: 7px 0; color: #6b7280; font-size: 14px;">Property</td><td style="padding: 7px 0; font-size: 14px;">${application.propertyAddress}</td></tr>` : ""}
@@ -1209,7 +1209,8 @@ serve(async (req) => {
               <ul style="margin: 10px 0 0; padding-left: 18px; color: #374151; font-size: 13px; line-height: 1.8;">
                 <li>No timely option exercise recorded in CRM</li>
                 <li>No timely signed PSA amendment recorded in CRM</li>
-                <li>CRM Deal status: <strong>Closed</strong></li>
+                <li>Option Cycle status: <strong>Missed</strong> (Deal status was not changed by automation)</li>
+                <li>Decide separately whether to change the Deal status</li>
                 <li>Review escrow/return-of-funds process separately</li>
                 <li>If borrower submitted documentation, use Admin Override to review</li>
               </ul>

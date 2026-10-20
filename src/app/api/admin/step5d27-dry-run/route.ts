@@ -533,7 +533,7 @@ export async function GET(request: Request) {
   //   3.  Timely amendment blocks auto-close (fee NOT required)
   //   4.  Late exercise does NOT block auto-close
   //   5.  Late amendment does NOT automatically block auto-close
-  //   6.  Eligible unsatisfied cycle → would_close (active→missed, funded→closed)
+  //   6.  Eligible unsatisfied cycle → would_close (active→missed; Deal status NOT changed)
   //   7.  Exact activity event types and messages that WOULD be written
   //   8.  Closeout email event types and recipients
   //   9.  Client closeout copy inspection (policy violations check)
@@ -667,27 +667,25 @@ export async function GET(request: Request) {
       borrower_applications: {
         id: KNOWN_APP_ID,
         field: 'app_status',
-        from: 'funded',
-        to: 'closed',
-        guard: 'WHERE app_status = \'funded\'',
+        write: 'NONE — auto-close does NOT modify borrower_applications.app_status or deal_workflow_stage',
+        required_current_value: 'funded',
+        guard: 'Deal must be funded (guard_deal_not_funded); row is locked and validated only',
       },
       application_activity_row_1: {
         event_type: 'option_cycle_missed',
-        title: `Option Exercise Deadline missed — Deal auto-closed`,
-        detail: `Option Exercise Deadline ${formatDateDisplay(deadline)} passed with no timely exercise or signed amendment. CRM Deal auto-closed. Review escrow/return-of-funds process separately.`,
+        title: `Option Exercise Deadline missed`,
+        detail: `The Option Exercise Deadline (${formatDateDisplay(deadline)}) passed with no timely exercise or signed amendment. The Option Cycle was marked missed. Review escrow/return-of-funds process separately.`,
         actor: 'EarnestBridge Automation',
       },
-      application_activity_row_2: {
-        event_type: 'status_change',
-        title: 'Deal status changed: Funded → Closed',
-        detail: `Automatic CRM closeout triggered by missed Option Exercise Deadline (${formatDateDisplay(deadline)}).`,
-        actor: 'EarnestBridge Automation',
+      application_activity_status_change: {
+        written: false,
+        note: 'No status_change activity is inserted. Auto-close does not change Deal status.',
       },
       option_cycle_automation_log_auto_close: {
         event_type: 'auto_close',
         dedupe_key: autoCloseDedupe,
         status_on_success: 'completed',
-        note: 'auto_close log completion is committed INSIDE execute_option_cycle_auto_close() — same atomic transaction as cycle→missed and deal→closed. No separate markLogCompleted() call for auto_close.',
+        note: 'auto_close log completion is committed INSIDE execute_option_cycle_auto_close() — same atomic transaction as cycle→missed and the option_cycle_missed activity. No separate markLogCompleted() call for auto_close.',
       },
       option_cycle_automation_log_client_closeout: {
         event_type: 'client_closeout_notice',
@@ -738,10 +736,10 @@ export async function GET(request: Request) {
     // ── 11. Client closeout copy inspection ───────────────────────────────────
     // Exact rendered copy from production template (option_client_closeout)
     const clientCloseoutCopy = {
-      subject: 'Important Notice: EarnestBridge Deal Closed — EarnestBridge',
-      heading: 'Deal Closed — Option Exercise Deadline Not Met',
-      primary_message: 'Your EarnestBridge deal has been closed because the Option Exercise Deadline was not met.',
-      contact_prompt: 'Please contact EarnestBridge immediately if you believe required extension documentation was submitted.',
+      subject: 'Option Exercise Deadline Missed — EarnestBridge',
+      heading: 'Your Option Exercise Deadline Has Passed',
+      primary_message: 'The Option Exercise Deadline was not met, and the associated Option Cycle has been marked missed.',
+      contact_prompt: 'Please contact EarnestBridge regarding next steps. If you believe required extension documentation was submitted, let us know right away.',
       contact_info: 'You can reach us at admin@earnestbridge.com.',
       cta: 'Contact EarnestBridge →',
       fields_shown: ['property_address (conditional)', 'Option Exercise Deadline date'],
@@ -762,9 +760,9 @@ export async function GET(request: Request) {
 
     // ── 12. Admin closeout copy inspection ────────────────────────────────────
     const adminCloseoutCopy = {
-      subject: `[Admin] Deal Auto-Closed — Option Deadline Missed — <dealName> | EarnestBridge`,
-      heading: 'CRM Deal Auto-Closed — Option Deadline Missed',
-      intro: 'The following deal has been automatically closed by the CRM because the Option Exercise Deadline passed with no timely exercise or signed amendment recorded.',
+      subject: `[Admin] Option Exercise Deadline Missed — <dealName> | EarnestBridge`,
+      heading: 'Option Cycle Marked Missed — Option Exercise Deadline Passed',
+      intro: 'The Option Cycle for the following deal was marked missed because the Option Exercise Deadline passed with no timely exercise or signed amendment recorded. The automation did not modify the Deal status; the Deal remains subject to a separate Admin status decision.',
       fields_in_deal_table: [
         'Deal (dealDisplayName)',
         'Property (propertyAddress)',
@@ -775,12 +773,13 @@ export async function GET(request: Request) {
       action_required_items: [
         'No timely option exercise recorded in CRM',
         'No timely signed PSA amendment recorded in CRM',
-        'CRM Deal status: Closed',
+        'Option Cycle status: Missed (Deal status was not changed by automation)',
+        'Decide separately whether to change the Deal status',
         'Review escrow/return-of-funds process separately',
         'If borrower submitted documentation, use Admin Override to review',
       ],
       cta: 'Review in Admin Dashboard →',
-      header_style: 'adminBrandedHeader("DEAL AUTO-CLOSED") — green #173F35 gradient, gold #C9A227 accent',
+      header_style: 'adminBrandedHeader("OPTION CYCLE MARKED MISSED") — green #173F35 gradient, gold #C9A227 accent',
     };
 
     // ── 13. Idempotency / failure separation analysis ─────────────────────────
@@ -807,7 +806,7 @@ export async function GET(request: Request) {
 
     const failureSeparation = {
       scenario_client_email_fails_after_auto_close: {
-        deal_status: 'closed (unchanged)',
+        deal_status: 'funded (unchanged — auto-close does not modify Deal status)',
         cycle_status: 'missed (unchanged)',
         auto_close_log_row: 'completed (unchanged — auto_close completion is committed atomically inside execute_option_cycle_auto_close(), before any email sends)',
         client_closeout_log_row: 'failed/retryable (attempt_count=1, status=failed)',
@@ -816,7 +815,7 @@ export async function GET(request: Request) {
         explanation: 'auto_close log is marked completed INSIDE the atomic RPC transaction (execute_option_cycle_auto_close). Email failure cannot re-trigger auto_close because its dedupe row is already completed before any email is attempted.',
       },
       scenario_admin_email_fails_after_auto_close: {
-        deal_status: 'closed (unchanged)',
+        deal_status: 'funded (unchanged — auto-close does not modify Deal status)',
         cycle_status: 'missed (unchanged)',
         auto_close_log_row: 'completed (unchanged)',
         client_closeout_log_row: 'independently complete/processable (unaffected)',
@@ -849,7 +848,7 @@ export async function GET(request: Request) {
       function_description: 'action === \'extension_override\' block in PATCH handler',
       requirements: [
         'current cycle status must be \'missed\'',
-        'Deal must be \'closed\'',
+        'Deal must be \'funded\' and not purged (otherwise 422 deal_not_funded)',
         'actual_amendment_received_at must NOT be NULL',
         'Admin must provide explicit attestation (admin_attests_extension_accepted: true)',
         'Admin must provide new deposit_goes_hard_date',
@@ -857,10 +856,10 @@ export async function GET(request: Request) {
       behavior: {
         prior_missed_cycle: 'PRESERVED as status=missed — NEVER rewritten',
         new_cycle: 'INSERT with cycle_number = previous + 1, status = active',
-        deal_transition: 'Closed → Funded (app_status updated to funded)',
+        deal_transition: 'NONE — extension override does NOT change Deal status (app_status / deal_workflow_stage are not written)',
         new_option_exercise_deadline: 'Calculated via fn_subtract_business_days(new_hard_date, 2)',
         extension_fee: 'May still be pending — does NOT block override',
-        activity_logged: ['extension_override_accepted', 'status_change'],
+        activity_logged: ['extension_override_accepted'],
       },
       client_exposure: 'NONE — override policy is never exposed to borrower',
     };
@@ -994,9 +993,9 @@ export async function GET(request: Request) {
       },
 
       auto_close_deal_transition: {
-        expected: 'funded → closed',
+        expected: 'NONE — Deal status is not modified by auto-close (Deal must be funded; remains funded)',
         would_write: wouldBeWrites.borrower_applications,
-        note: 'Operational CRM close only. Does NOT represent legal termination of PSA, legal expiration of due diligence, automatic escrow return, or movement of escrow funds.',
+        note: 'Operational Option Cycle outcome only. Does NOT change Deal status and does NOT represent legal termination of PSA, legal expiration of due diligence, automatic escrow return, or movement of escrow funds. Changing a Deal to Closed remains a manual Admin decision.',
       },
 
       cycle_transition: {
@@ -1007,17 +1006,12 @@ export async function GET(request: Request) {
       auto_close_activity_events: {
         event_1: {
           event_type: 'option_cycle_missed',
-          title: `Option Exercise Deadline missed — Deal auto-closed`,
-          detail: `Option Exercise Deadline ${formatDateDisplay(deadline)} passed with no timely exercise or signed amendment. CRM Deal auto-closed. Review escrow/return-of-funds process separately.`,
+          title: `Option Exercise Deadline missed`,
+          detail: `The Option Exercise Deadline (${formatDateDisplay(deadline)}) passed with no timely exercise or signed amendment. The Option Cycle was marked missed. Review escrow/return-of-funds process separately.`,
           actor: 'EarnestBridge Automation',
         },
-        event_2: {
-          event_type: 'status_change',
-          title: 'Deal status changed: Funded → Closed',
-          detail: `Automatic CRM closeout triggered by missed Option Exercise Deadline (${formatDateDisplay(deadline)}).`,
-          actor: 'EarnestBridge Automation',
-        },
-        note: 'These rows would be written to application_activity. NOT written during this dry-run.',
+        status_change_event: 'NONE — no status_change activity is written by auto-close',
+        note: 'This row would be written to application_activity. NOT written during this dry-run.',
       },
 
       closeout_email_events: {
@@ -1103,10 +1097,10 @@ export async function GET(request: Request) {
           'execute_option_cycle_auto_close(p_cycle_id uuid, p_application_id uuid, p_cutoff_at timestamptz, p_automation_log_id uuid, p_deadline_snapshot text)',
 
         auto_close_log_completion_location:
-          'INSIDE execute_option_cycle_auto_close() — committed atomically in the same PostgreSQL transaction as cycle→missed and deal→closed. No separate markLogCompleted() call for auto_close.',
+          'INSIDE execute_option_cycle_auto_close() — committed atomically in the same PostgreSQL transaction as cycle→missed. No separate markLogCompleted() call for auto_close.',
 
         activity_insert_location:
-          'INSIDE execute_option_cycle_auto_close() — both option_cycle_missed and status_change rows are inserted in the same atomic transaction. No separate logActivity() calls for the canonical auto-close activities.',
+          'INSIDE execute_option_cycle_auto_close() — the option_cycle_missed row is inserted in the same atomic transaction. No status_change row is written. No separate logActivity() calls for the canonical auto-close activity.',
 
         activity_idempotency_constraint: {
           status: 'BLOCKER IDENTIFIED AND RESOLVED IN MIGRATION 20260917000100',
@@ -1122,9 +1116,9 @@ export async function GET(request: Request) {
         },
 
         separate_cycle_update_still_exists: 'NO — cycle→missed is inside execute_option_cycle_auto_close()',
-        separate_deal_update_still_exists: 'NO — deal→closed is inside execute_option_cycle_auto_close()',
+        separate_deal_update_still_exists: 'NO — auto-close performs no Deal status update at all',
         separate_auto_close_mark_log_completed_still_exists: 'NO — auto_close log completion is inside execute_option_cycle_auto_close()',
-        separate_post_rpc_activity_inserts_still_exist: 'NO — both canonical activity rows are inside execute_option_cycle_auto_close()',
+        separate_post_rpc_activity_inserts_still_exist: 'NO — the canonical option_cycle_missed row is inside execute_option_cycle_auto_close()',
 
         auto_close_log_guards: {
           description: 'RPC verifies the supplied automation log row before any write',
@@ -1149,8 +1143,8 @@ export async function GET(request: Request) {
             'option_cycle_automation_log.event_type = \'auto_close\'',
             'option_cycle_automation_log.status = \'completed\'',
             'crm_deal_option_cycles.status = \'missed\'',
-            'borrower_applications.app_status = \'closed\'',
           ],
+          deal_status_required: 'NO — reconciliation does not depend on borrower_applications.app_status',
           manual_closure_triggers_reconciliation: 'NO — requires completed auto_close log evidence',
           missed_cycle_without_completed_auto_close_triggers_reconciliation: 'NO — auto_close log status = completed is required',
         },
