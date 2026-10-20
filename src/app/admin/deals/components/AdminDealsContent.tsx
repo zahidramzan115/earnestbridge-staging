@@ -561,7 +561,7 @@ export default function AdminDealsContent() {
         <div className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm">
           <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Active Deals</p>
           <p className="text-2xl font-display font-700 text-gray-900">{activeDeals.length}</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Approved · Funded</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Approved · Funded · Legacy In Progress</p>
         </div>
         <div className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm">
           <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Requested EMD Pipeline</p>
