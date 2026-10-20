@@ -16,7 +16,7 @@ import DealInvoicesSection from './DealInvoicesSection';
 import DealCrmContactsSection from './DealCrmContactsSection';
 import EmailAttachmentPicker, { AttachmentDescriptor, cleanupAttachments } from '@/components/EmailAttachmentPicker';
 
-type AppStatus = 'draft' | 'application' | 'submitted' | 'under_review' | 'in_review' | 'approved' | 'conditionally_approved' | 'in_progress' | 'funded' | 'closed' | 'rejected' | 'expired';
+type AppStatus = 'draft' | 'application' | 'submitted' | 'under_review' | 'in_review' | 'approved' | 'conditionally_approved' | 'in_progress' | 'funded' | 'closed' | 'rejected' | 'dead' | 'expired';
 
 interface BorrowerApplication {
   id: string;
@@ -67,21 +67,24 @@ interface ActivityItem {
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  draft:                  { label: 'Draft',                color: 'text-gray-500',    bg: 'bg-gray-50',     border: 'border-gray-200' },
-  submitted:              { label: 'Submitted',            color: 'text-blue-700',    bg: 'bg-blue-100',    border: 'border-blue-200' },
-  application:            { label: 'Application',          color: 'text-gray-600',    bg: 'bg-gray-100',    border: 'border-gray-200' },
-  under_review:           { label: 'Under Review',         color: 'text-amber-700',   bg: 'bg-amber-100',   border: 'border-amber-200' },
-  in_review:              { label: 'In Review',            color: 'text-amber-700',   bg: 'bg-amber-100',   border: 'border-amber-200' },
-  approved:               { label: 'Approved',             color: 'text-green-700',   bg: 'bg-green-100',   border: 'border-green-200' },
-  conditionally_approved: { label: 'Cond. Approved',       color: 'text-teal-700',    bg: 'bg-teal-100',    border: 'border-teal-200' },
-  in_progress:            { label: 'In Progress',          color: 'text-blue-700',    bg: 'bg-blue-100',    border: 'border-blue-200' },
-  funded:                 { label: 'Funded',               color: 'text-emerald-700', bg: 'bg-emerald-100', border: 'border-emerald-200' },
-  closed:                 { label: 'Closed',               color: 'text-gray-700',    bg: 'bg-gray-200',    border: 'border-gray-300' },
-  rejected:               { label: 'Rejected',             color: 'text-red-700',     bg: 'bg-red-100',     border: 'border-red-200' },
-  expired:                { label: 'Expired',              color: 'text-gray-600',    bg: 'bg-gray-100',    border: 'border-gray-200' },
+  draft:                  { label: 'Draft',                          color: 'text-gray-500',    bg: 'bg-gray-50',     border: 'border-gray-200' },
+  submitted:              { label: 'Application Submitted',          color: 'text-blue-700',    bg: 'bg-blue-100',    border: 'border-blue-200' },
+  application:            { label: 'Application Submitted',          color: 'text-gray-600',    bg: 'bg-gray-100',    border: 'border-gray-200' },
+  under_review:           { label: 'Under Review',                   color: 'text-amber-700',   bg: 'bg-amber-100',   border: 'border-amber-200' },
+  in_review:              { label: 'Under Review (Legacy)',          color: 'text-amber-700',   bg: 'bg-amber-100',   border: 'border-amber-200' },
+  approved:               { label: 'Approved',                       color: 'text-green-700',   bg: 'bg-green-100',   border: 'border-green-200' },
+  conditionally_approved: { label: 'Conditionally Approved (Legacy)', color: 'text-teal-700',   bg: 'bg-teal-100',    border: 'border-teal-200' },
+  in_progress:            { label: 'In Progress (Legacy)',           color: 'text-blue-700',    bg: 'bg-blue-100',    border: 'border-blue-200' },
+  funded:                 { label: 'Funded',                         color: 'text-emerald-700', bg: 'bg-emerald-100', border: 'border-emerald-200' },
+  closed:                 { label: 'Closed',                         color: 'text-gray-700',    bg: 'bg-gray-200',    border: 'border-gray-300' },
+  rejected:               { label: 'Rejected',                       color: 'text-red-700',     bg: 'bg-red-100',     border: 'border-red-200' },
+  dead:                   { label: 'Dead',                           color: 'text-slate-700',   bg: 'bg-slate-200',   border: 'border-slate-300' },
+  expired:                { label: 'Expired (Legacy)',               color: 'text-gray-600',    bg: 'bg-gray-100',    border: 'border-gray-200' },
 };
 
-const ALL_STATUSES: AppStatus[] = ['application', 'submitted', 'under_review', 'approved', 'in_progress', 'funded', 'closed', 'rejected'];
+// Canonical TARGET statuses only. Legacy values (submitted, in_progress, etc.)
+// may be displayed as the CURRENT status but are never selectable targets.
+const ALL_STATUSES: AppStatus[] = ['application', 'under_review', 'approved', 'rejected', 'dead', 'funded', 'closed'];
 
 const APPLICATION_PHASES = [
   { phase: 'Phase 1', label: 'Application Submitted', icon: 'DocumentTextIcon', steps: [
@@ -124,9 +127,14 @@ function getPhaseIndexForStatus(status: AppStatus | string): number {
     case 'approved': case 'conditionally_approved': case 'in_progress': return 2;
     case 'funded': return 3;
     case 'closed': return 4;
-    case 'rejected': case 'expired': return 2;
+    // Terminal non-forward outcomes: no active forward phase is highlighted.
+    case 'rejected': case 'dead': case 'expired': return -1;
     default: return 0;
   }
+}
+
+function isTerminalNegativeStatus(status: AppStatus | string): boolean {
+  return status === 'rejected' || status === 'dead' || status === 'expired';
 }
 
 function formatCurrency(val: number | null) {
@@ -785,7 +793,7 @@ function AdminVersionedDocuments({ applicationId, userId, borrowerEmail, borrowe
             </div>
             {adminUploading && (<div><div className="flex justify-between text-[11px] text-gray-500 mb-1"><span>Uploading…</span><span>{adminUploadProgress}%</span></div><div className="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-eb-green-900 rounded-full transition-all" style={{ width: `${adminUploadProgress}%` }} /></div></div>)}
             <div className="flex items-center justify-end gap-2">
-              <button type="button" onClick={() => { setShowAdminUpload(false); setAdminUploadFile(null); setAdminUploadName(''); setAdminUploadFeedback(''); }} className="px-3 py-1.5 text-xs font-display font-600 text-gray-500 bg-gray-100 hover:bg-gray-200 transition-all rounded-lg">Cancel</button>
+              <button type="button" onClick={() => { setShowAdminUpload(false); setAdminUploadFile(null); setAdminUploadName(''); setAdminUploadFeedback(''); }} className="px-3 py-1.5 text-xs font-display font-600 text-gray-500 bg-gray-100 hover:bg-gray-200 transition-all">Cancel</button>
               <button type="submit" disabled={adminUploading || !adminUploadFile || !adminUploadName.trim()} className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-display font-600 text-white bg-eb-green-900 rounded-lg hover:bg-eb-green-800 transition-all disabled:opacity-50">
                 {adminUploading ? <Icon name="ArrowPathIcon" size={12} className="animate-spin" /> : <Icon name="ArrowUpTrayIcon" size={12} />}
                 {adminUploading ? 'Uploading…' : 'Upload'}
@@ -1829,7 +1837,7 @@ function AdminDocuments({ applicationId, userId, borrowerEmail, borrowerFirstNam
                             <span className={`text-xs font-display font-700 ${reviewAction === 'approve' ? 'text-emerald-800' : reviewAction === 'reject' ? 'text-red-800' : 'text-orange-800'}`}>{reviewAction === 'approve' ? 'Approve Document' : reviewAction === 'reject' ? 'Reject Document' : 'Send Flag'}</span>
                           </div>
                           <div>
-                            <label className={`block text-[11px] font-display font-600 mb-1.5 ${reviewAction === 'approve' ? 'text-emerald-700' : reviewAction === 'reject' ? 'text-red-700' : 'text-orange-700'}`}>{reviewAction === 'approve' ? 'Approval note (optional)' : reviewAction === 'reject' ? 'Rejection reason (shown to borrower)' : 'Resubmission instructions (shown to borrower)'}</label>
+                            <label className={`block text-[11px] font-display font-600 mb-1.5 ${reviewAction === 'approve' ? 'text-emerald-700' : reviewAction === 'reject' ? 'text-red-700' : 'text-orange-700'}`}>{reviewAction === 'approve' ? 'Approval note (optional)' : reviewAction === 'reject' ? 'Rejection reason (shown to borrower)' : 'Resubmission instructions (shown to borrower)'} </label>
                             <textarea value={feedbackNote} onChange={(e) => setFeedbackNote(e.target.value)} placeholder={reviewAction === 'approve' ? 'Add an optional note…' : reviewAction === 'reject' ? 'Explain why this document is being rejected…' : 'Describe what the borrower needs to fix or resubmit…'} rows={3} autoFocus className={`w-full text-xs border rounded-lg px-3 py-2 outline-none resize-none transition-all bg-white ${reviewAction === 'approve' ? 'border-emerald-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400' : reviewAction === 'reject' ? 'border-red-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-400' : 'border-orange-200 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400'}`} />
                             {reviewAction !== 'approve' && <p className="text-[10px] text-gray-400 mt-1">This note will be visible to the borrower in their document checklist.</p>}
                           </div>
@@ -2448,6 +2456,8 @@ const BorrowerDetailContent: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState<AppStatus | ''>('');
   const [statusNote, setStatusNote] = useState('');
   const [statusSuccess, setStatusSuccess] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const statusSubmitLockRef = useRef(false);
 
   // Activity
   const [activity, setActivity] = useState<ActivityItem[]>([]);
@@ -2485,9 +2495,7 @@ const BorrowerDetailContent: React.FC = () => {
   const [docCount, setDocCount] = useState<number | null>(null);
 
   // ── NEW: Inline header edit state ─────────────────────────────────────
-  const [headerStatus, setHeaderStatus] = useState<AppStatus | ''>('');
   const [headerOwner, setHeaderOwner] = useState<string>('');
-  const [updatingHeaderStatus, setUpdatingHeaderStatus] = useState(false);
   const [updatingHeaderOwner, setUpdatingHeaderOwner] = useState(false);
 
   // ── NEW: Quick action modals ───────────────────────────────────────────
@@ -2516,46 +2524,46 @@ const BorrowerDetailContent: React.FC = () => {
   const [attachmentPickerKey, setAttachmentPickerKey] = useState(0);
 
   // Load application
-  useEffect(() => {
+  const loadApplication = useCallback(async () => {
     if (!applicationId) return;
 
     if (isMockId) {
       const demo = DEMO_APPLICATIONS.find((a) => a.id === applicationId) ?? DEMO_APPLICATIONS[0];
       setApplication(demo);
       setSelectedStatus(demo.app_status);
-      setHeaderStatus(demo.app_status);
       setHeaderOwner(demo.eb_assigned_owner ?? 'Unassigned');
       setLoading(false);
       return;
     }
 
-    supabase
+    const { data, error } = await supabase
       .from('borrower_applications')
       .select('*')
       .eq('id', applicationId)
       .is('purged_at', null)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (!error && !data) {
-          // Missing or purged Deal — never render it as an active Deal
-          router.replace('/admin/deals');
-          return;
-        }
-        if (error || !data) {
-          const demo = DEMO_APPLICATIONS[0];
-          setApplication(demo);
-          setSelectedStatus(demo.app_status);
-          setHeaderStatus(demo.app_status);
-          setHeaderOwner(demo.eb_assigned_owner ?? 'Unassigned');
-        } else {
-          setApplication(data as BorrowerApplication);
-          setSelectedStatus((data as BorrowerApplication).app_status);
-          setHeaderStatus((data as BorrowerApplication).app_status);
-          setHeaderOwner((data as BorrowerApplication).eb_assigned_owner ?? 'Unassigned');
-        }
-        setLoading(false);
-      });
-  }, [applicationId, isMockId, supabase]);
+      .maybeSingle();
+
+    if (!error && !data) {
+      // Missing or purged Deal — never render it as an active Deal
+      router.replace('/admin/deals');
+      return;
+    }
+    if (error || !data) {
+      const demo = DEMO_APPLICATIONS[0];
+      setApplication(demo);
+      setSelectedStatus(demo.app_status);
+      setHeaderOwner(demo.eb_assigned_owner ?? 'Unassigned');
+    } else {
+      setApplication(data as BorrowerApplication);
+      setSelectedStatus((data as BorrowerApplication).app_status);
+      setHeaderOwner((data as BorrowerApplication).eb_assigned_owner ?? 'Unassigned');
+    }
+    setLoading(false);
+  }, [applicationId, isMockId, supabase, router]);
+
+  useEffect(() => {
+    loadApplication();
+  }, [loadApplication]);
 
   // ── NEW: Load CRM enrichment data ─────────────────────────────────────
   const loadCrmEnrichment = useCallback(async (app: BorrowerApplication) => {
@@ -2677,83 +2685,75 @@ const BorrowerDetailContent: React.FC = () => {
     if (activeTab === 'activity') loadActivity();
   }, [activeTab, loadActivity]);
 
-  // Update status
+  // Update status — canonical server-side path (POST /api/admin/deals/[id]/status).
+  // The server owns app_status mutation, application_activity, audit_logs and
+  // real Admin identity. The existing DB status trigger remains the email sender.
   async function handleStatusUpdate() {
     if (!selectedStatus || !application) return;
+    // Synchronous lock to prevent duplicate submissions
+    if (statusSubmitLockRef.current) return;
+    statusSubmitLockRef.current = true;
     setUpdatingStatus(true);
-    let newStatus = selectedStatus as AppStatus;
+    setStatusError(null);
+    setStatusSuccess(false);
 
-    if (!isMockId) {
+    const requestedStatus = selectedStatus as AppStatus;
+    const trimmedNote = statusNote.trim();
+
+    // Demo/mock Deals have no server record — keep local-only behavior
+    if (isMockId) {
+      setApplication((prev) => prev ? { ...prev, app_status: requestedStatus } : prev);
+      setStatusNote('');
+      setStatusSuccess(true);
+      setTimeout(() => setStatusSuccess(false), 3000);
+      setUpdatingStatus(false);
+      statusSubmitLockRef.current = false;
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/deals/${applicationId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: requestedStatus, note: trimmedNote || null }),
+      });
+
+      let payload: { status?: string; changed?: boolean; error?: string } | null = null;
       try {
-        await supabase
-          .from('borrower_applications')
-          .update({ app_status: newStatus, updated_at: new Date().toISOString() })
-          .eq('id', applicationId);
-      } catch (_) {}
-
-      // Log activity
-      try {
-        await supabase.from('application_activity').insert({
-          application_id: applicationId,
-          user_id: application.user_id,
-          event_type: 'status_change',
-          title: `Status changed to ${STATUS_CONFIG[newStatus]?.label ?? newStatus}`,
-          detail: statusNote.trim() || `Application status updated by admin.`,
-          actor: 'EarnestBridge Admin',
-        });
-      } catch (_) {}
-
-      // Send email notification
-      if (statusNote.trim()) {
-        fetch('/api/send-status-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            borrowerEmail: application.email,
-            borrowerFirstName: application.first_name,
-            borrowerLastName: application.last_name,
-            newStatus,
-            note: statusNote.trim(),
-            propertyAddress: application.property_address || '',
-          }),
-        }).catch(() => {});
+        payload = await res.json();
+      } catch {
+        payload = null;
       }
+
+      if (res.ok && payload?.status) {
+        const canonicalStatus = payload.status as AppStatus;
+        setApplication((prev) => prev ? { ...prev, app_status: canonicalStatus } : prev);
+        setSelectedStatus(canonicalStatus);
+        if (payload.changed !== false) {
+          setStatusNote('');
+        }
+        setStatusSuccess(true);
+        setTimeout(() => setStatusSuccess(false), 3000);
+      } else if (res.status === 409) {
+        setStatusError('Deal status changed elsewhere. Refreshing the latest status.');
+        await loadApplication();
+      } else if (res.status === 401) {
+        setStatusError('Your session has expired. Please sign in again and retry.');
+      } else if (res.status === 403) {
+        setStatusError('You do not have permission to change Deal status.');
+      } else if (res.status === 404) {
+        setStatusError('This Deal could not be found. It may have been removed.');
+      } else if (res.status === 400) {
+        setStatusError(payload?.error || 'The status update was rejected as invalid. Please review your selection and note.');
+      } else {
+        setStatusError(payload?.error || 'Failed to update Deal status. Please try again.');
+      }
+    } catch {
+      setStatusError('Network error while updating Deal status. Please check your connection and try again.');
+    } finally {
+      setUpdatingStatus(false);
+      statusSubmitLockRef.current = false;
     }
-
-    setApplication((prev) => prev ? { ...prev, app_status: newStatus } : prev);
-    setHeaderStatus(newStatus);
-    setStatusNote('');
-    setStatusSuccess(true);
-    setTimeout(() => setStatusSuccess(false), 3000);
-    setUpdatingStatus(false);
-  }
-
-  // ── NEW: Inline header status update ──────────────────────────────────
-  async function handleHeaderStatusUpdate(newStatus: AppStatus) {
-    if (!application || newStatus === application.app_status) return;
-    setUpdatingHeaderStatus(true);
-    setHeaderStatus(newStatus);
-
-    if (!isMockId) {
-      try {
-        await supabase
-          .from('borrower_applications')
-          .update({ app_status: newStatus, updated_at: new Date().toISOString() })
-          .eq('id', applicationId);
-        await supabase.from('application_activity').insert({
-          application_id: applicationId,
-          user_id: application.user_id,
-          event_type: 'status_change',
-          title: `Status changed to ${STATUS_CONFIG[newStatus]?.label ?? newStatus}`,
-          detail: 'Status updated from Deal header.',
-          actor: 'EarnestBridge Admin',
-        });
-      } catch (_) {}
-    }
-
-    setApplication((prev) => prev ? { ...prev, app_status: newStatus } : prev);
-    setSelectedStatus(newStatus);
-    setUpdatingHeaderStatus(false);
   }
 
   // ── NEW: Inline header owner update ───────────────────────────────────
@@ -2871,7 +2871,7 @@ const BorrowerDetailContent: React.FC = () => {
       if (crmContact?.id) {
         // Use existing CRM send-email API (logs to crm_email_log + crm_activities)
         try {
-          const payload: Record<string, unknown> = {
+          let payload: Record<string, unknown> = {
             to: emailForm.to,
             subject: emailForm.subject,
             body: emailForm.body,
@@ -3195,23 +3195,12 @@ const BorrowerDetailContent: React.FC = () => {
               <p className="text-sm font-display font-700 text-gray-800">{formatDueDiligenceDays(application.due_diligence_days)}</p>
             </div>
 
-            {/* Stage — inline editable */}
+            {/* Stage — read-only (edit via the Update Status card) */}
             <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
               <p className="text-[10px] font-700 text-gray-500 uppercase tracking-wide mb-1">Stage</p>
-              <div className="relative">
-                <select
-                  value={headerStatus}
-                  onChange={e => handleHeaderStatusUpdate(e.target.value as AppStatus)}
-                  disabled={updatingHeaderStatus}
-                  className={`w-full text-xs font-600 border-0 bg-transparent outline-none cursor-pointer pr-4 appearance-none ${statusCfg.color} disabled:opacity-60`}
-                  style={{ WebkitAppearance: 'none' }}
-                >
-                  {ALL_STATUSES.map(s => (
-                    <option key={s} value={s}>{STATUS_CONFIG[s]?.label ?? s}</option>
-                  ))}
-                </select>
-                <Icon name={updatingHeaderStatus ? 'ArrowPathIcon' : 'ChevronDownIcon'} size={10} className={`absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none ${updatingHeaderStatus ? 'animate-spin' : ''}`} />
-              </div>
+              <span className={`inline-flex text-xs font-display font-600 px-2.5 py-1 rounded-full border ${statusCfg.color} ${statusCfg.bg} ${statusCfg.border}`}>
+                {statusCfg.label}
+              </span>
             </div>
 
             {/* Owner — inline editable */}
@@ -3305,9 +3294,12 @@ const BorrowerDetailContent: React.FC = () => {
         <div className="px-5 pb-5 border-t border-gray-100 pt-4">
           <div className="flex items-center gap-0 overflow-x-auto pb-1">
             {APPLICATION_PHASES.map((phase, idx) => {
-              const isCompleted = idx < currentPhaseIdx;
-              const isCurrent = idx === currentPhaseIdx;
-              const isRejected = (application.app_status === 'rejected' || application.app_status === 'expired') && idx === currentPhaseIdx;
+              const isTerminalNegative = isTerminalNegativeStatus(application.app_status);
+              // For rejected/dead/expired, show only the first phase as completed
+              // (the Deal was submitted) and mark nothing as actively progressing.
+              const isCompleted = isTerminalNegative ? idx === 0 : idx < currentPhaseIdx;
+              const isCurrent = !isTerminalNegative && idx === currentPhaseIdx;
+              const isRejected = false;
               return (
                 <React.Fragment key={phase.phase}>
                   <div className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-shrink-0 transition-all ${isCurrent && !isRejected ? 'bg-eb-green-50 border border-eb-green-200' : isCompleted ? 'opacity-80' : 'opacity-40'}`}>
@@ -3323,6 +3315,12 @@ const BorrowerDetailContent: React.FC = () => {
               );
             })}
           </div>
+          {isTerminalNegativeStatus(application.app_status) && (
+            <div className={`mt-3 inline-flex items-center gap-2 text-[11px] font-display font-600 px-3 py-1.5 rounded-lg border ${statusCfg.color} ${statusCfg.bg} ${statusCfg.border}`}>
+              <Icon name="XMarkIcon" size={11} />
+              Deal outcome: {statusCfg.label}
+            </div>
+          )}
         </div>
       </div>
 
@@ -3685,8 +3683,14 @@ const BorrowerDetailContent: React.FC = () => {
                   <select
                     value={selectedStatus}
                     onChange={(e) => setSelectedStatus(e.target.value as AppStatus)}
-                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg outline-none focus:border-eb-green-900 focus:ring-1 focus:ring-eb-green-500/20 bg-white transition-all"
+                    disabled={updatingStatus}
+                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg outline-none focus:border-eb-green-900 focus:ring-1 focus:ring-eb-green-500/20 bg-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                   >
+                    {selectedStatus && !ALL_STATUSES.includes(selectedStatus as AppStatus) && (
+                      <option value={selectedStatus} disabled>
+                        {STATUS_CONFIG[selectedStatus]?.label ?? selectedStatus} (current)
+                      </option>
+                    )}
                     {ALL_STATUSES.map((s) => (
                       <option key={s} value={s}>{STATUS_CONFIG[s]?.label ?? s}</option>
                     ))}
@@ -3697,6 +3701,8 @@ const BorrowerDetailContent: React.FC = () => {
                   <textarea
                     value={statusNote}
                     onChange={(e) => setStatusNote(e.target.value)}
+                    disabled={updatingStatus}
+                    maxLength={2000}
                     placeholder="Add a note about this status change…"
                     rows={3}
                     className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg outline-none focus:border-eb-green-900 focus:ring-1 focus:ring-eb-green-500/20 resize-none transition-all"
@@ -3706,6 +3712,12 @@ const BorrowerDetailContent: React.FC = () => {
                   <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
                     <Icon name="CheckCircleIcon" size={13} />
                     Status updated successfully
+                  </div>
+                )}
+                {statusError && (
+                  <div role="alert" className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    <Icon name="XCircleIcon" size={13} className="mt-0.5 flex-shrink-0" />
+                    <span>{statusError}</span>
                   </div>
                 )}
                 <button
