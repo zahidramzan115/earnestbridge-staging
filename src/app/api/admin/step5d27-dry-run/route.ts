@@ -667,15 +667,25 @@ export async function GET(request: Request) {
       borrower_applications: {
         id: KNOWN_APP_ID,
         field: 'app_status',
+        from: 'funded',
+        to: 'funded',
+        guard: 'WHERE app_status = \'funded\' (guard_deal_not_funded) — row is locked and validated only; NOT written',
         write: 'NONE — auto-close does NOT modify borrower_applications.app_status or deal_workflow_stage',
         required_current_value: 'funded',
-        guard: 'Deal must be funded (guard_deal_not_funded); row is locked and validated only',
       },
       application_activity_row_1: {
         event_type: 'option_cycle_missed',
         title: `Option Exercise Deadline missed`,
         detail: `The Option Exercise Deadline (${formatDateDisplay(deadline)}) passed with no timely exercise or signed amendment. The Option Cycle was marked missed. Review escrow/return-of-funds process separately.`,
         actor: 'EarnestBridge Automation',
+      },
+      application_activity_row_2: {
+        event_type: null,
+        title: null,
+        detail: null,
+        actor: null,
+        written: false,
+        note: 'No status_change activity is inserted. Auto-close does not change Deal status. Key retained for response-shape compatibility only.',
       },
       application_activity_status_change: {
         written: false,
@@ -741,7 +751,7 @@ export async function GET(request: Request) {
       primary_message: 'The Option Exercise Deadline was not met, and the associated Option Cycle has been marked missed.',
       contact_prompt: 'Please contact EarnestBridge regarding next steps. If you believe required extension documentation was submitted, let us know right away.',
       contact_info: 'You can reach us at admin@earnestbridge.com.',
-      cta: 'Contact EarnestBridge →',
+      cta: 'View My Deadlines →',
       fields_shown: ['property_address (conditional)', 'Option Exercise Deadline date'],
     };
 
@@ -1010,8 +1020,16 @@ export async function GET(request: Request) {
           detail: `The Option Exercise Deadline (${formatDateDisplay(deadline)}) passed with no timely exercise or signed amendment. The Option Cycle was marked missed. Review escrow/return-of-funds process separately.`,
           actor: 'EarnestBridge Automation',
         },
+        event_2: {
+          event_type: null,
+          title: null,
+          detail: null,
+          actor: null,
+          written: false,
+          note: 'No status_change activity is written by auto-close. Key retained for response-shape compatibility only.',
+        },
         status_change_event: 'NONE — no status_change activity is written by auto-close',
-        note: 'This row would be written to application_activity. NOT written during this dry-run.',
+        note: 'Only event_1 would be written to application_activity. NOT written during this dry-run.',
       },
 
       closeout_email_events: {

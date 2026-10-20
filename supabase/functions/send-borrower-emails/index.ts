@@ -386,7 +386,6 @@ serve(async (req) => {
     else if (emailType === "deadline_reminder") {
       toEmail = [borrower.email];
       const daysLeft = application?.daysUntilClosing ?? 0;
-      const daysUntilOptionExpires = application?.daysUntilOptionExpires ?? Math.max(0, daysLeft - 2);
       const urgencyColor = daysLeft <= 2 ? "#dc2626" : daysLeft <= 5 ? "#d97706" : "#2563eb";
       const urgencyBg = daysLeft <= 2 ? "#fef2f2" : daysLeft <= 5 ? "#fffbeb" : "#eff6ff";
       const urgencyBorder = daysLeft <= 2 ? "#fecaca" : daysLeft <= 5 ? "#fde68a" : "#bfdbfe";
@@ -409,10 +408,9 @@ serve(async (req) => {
             </div>
 
             <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 16px; margin: 16px 0;">
-              <p style="margin: 0; font-size: 13px; color: #92400e; font-weight: 700;">⚠️ Option Period Expires in ${daysUntilOptionExpires} Day${daysUntilOptionExpires !== 1 ? "s" : ""}</p>
+              <p style="margin: 0; font-size: 13px; color: #92400e; font-weight: 700;">Important: Review Your Option Exercise Deadline</p>
               <p style="margin: 8px 0 0; font-size: 13px; color: #78350f; line-height: 1.7;">
-                Your option period expires <strong>2 days before closing</strong>. If you need more time, you must sign an extension
-                <strong>before the option period expires</strong> — otherwise your EMD will be returned to EarnestBridge and the deal will be automatically closed.
+                Your Option Exercise Deadline is available in your EarnestBridge portal. If you need additional due-diligence time, please contact EarnestBridge before that deadline to review the required signed PSA amendment and any applicable Extension Deal Fee. If the deadline is missed, your Option Cycle may be marked missed. Escrow and return-of-funds procedures are handled separately.
               </p>
             </div>
 
