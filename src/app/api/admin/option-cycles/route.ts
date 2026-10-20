@@ -318,15 +318,11 @@ export async function POST(request: Request) {
   const nextCycleNumber = maxCycleRow ? maxCycleRow.cycle_number + 1 : 1;
 
   const { data: deadlineResult, error: calcError } = await supabase
-    .rpc('fn_subtract_business_days', {
-      p_start_date: deposit_goes_hard_date,
-      p_n: 2,
+    .rpc('fn_option_deadline_from_hard_date', {
+      p_hard_date: deposit_goes_hard_date,
     });
 
   if (calcError) {
-    if (calcError.message?.includes('Business holiday calendar unavailable')) {
-      return NextResponse.json({ error: calcError.message }, { status: 422 });
-    }
     return NextResponse.json({ error: 'Failed to calculate Option Exercise Deadline: ' + calcError.message }, { status: 500 });
   }
 
@@ -665,15 +661,11 @@ export async function PATCH(request: Request) {
     }
 
     const { data: deadlineResult, error: calcError } = await supabase
-      .rpc('fn_subtract_business_days', {
-        p_start_date: newHardDate,
-        p_n: 2,
+      .rpc('fn_option_deadline_from_hard_date', {
+        p_hard_date: newHardDate,
       });
 
     if (calcError) {
-      if (calcError.message?.includes('Business holiday calendar unavailable')) {
-        return NextResponse.json({ error: calcError.message }, { status: 422 });
-      }
       return NextResponse.json({ error: 'Failed to calculate Option Exercise Deadline: ' + calcError.message }, { status: 500 });
     }
 
@@ -811,17 +803,13 @@ export async function PATCH(request: Request) {
       );
     }
 
-    // Calculate new Option Exercise Deadline
+    // Calculate new Option Exercise Deadline (Hard Date minus 2 calendar days)
     const { data: deadlineResult, error: calcError } = await supabase
-      .rpc('fn_subtract_business_days', {
-        p_start_date: overrideHardDate,
-        p_n: 2,
+      .rpc('fn_option_deadline_from_hard_date', {
+        p_hard_date: overrideHardDate,
       });
 
     if (calcError) {
-      if (calcError.message?.includes('Business holiday calendar unavailable')) {
-        return NextResponse.json({ error: calcError.message }, { status: 422 });
-      }
       return NextResponse.json({ error: 'Failed to calculate Option Exercise Deadline: ' + calcError.message }, { status: 500 });
     }
 

@@ -220,7 +220,7 @@ function SetHardDateModal({ title, description, onSubmit, onCancel, loading, err
         <div>
           <label className="block text-[11px] font-display font-600 text-gray-500 mb-1.5">Deposit Goes Hard Date</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl outline-none focus:border-eb-green-900 focus:ring-1 focus:ring-eb-green-500/20 transition-all" />
-          <p className="text-[11px] text-gray-400 mt-1.5">The Option Exercise Deadline will be calculated automatically (2 Federal Reserve business days before this date).</p>
+          <p className="text-[11px] text-gray-400 mt-1.5">The Option Exercise Deadline will be calculated automatically (2 calendar days before this date, 5:00 PM Eastern).</p>
         </div>
         {error && (
           <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
@@ -724,7 +724,7 @@ function ExtensionOverrideModal({ missedCycle, isDealFunded, onSubmit, onCancel,
             onChange={(e) => setHardDate(e.target.value)}
             className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all"
           />
-          <p className="text-[11px] text-gray-400 mt-1.5">The new Option Exercise Deadline will be calculated automatically (2 Federal Reserve business days before this date).</p>
+          <p className="text-[11px] text-gray-400 mt-1.5">The new Option Exercise Deadline will be calculated automatically (2 calendar days before this date, 5:00 PM Eastern).</p>
         </div>
 
         {/* Admin attestation */}
@@ -1178,7 +1178,7 @@ const FundingOptionSection: React.FC<FundingOptionSectionProps> = ({
       {showSetHardDate && (
         <SetHardDateModal
           title="Set Deposit Goes Hard Date"
-          description="Enter the date the EMD deposit goes hard. The Option Exercise Deadline will be automatically calculated as 2 Federal Reserve business days before this date."
+          description="Enter the date the EMD deposit goes hard. The Option Exercise Deadline will be automatically calculated as 2 calendar days before this date, with a 5:00 PM Eastern cutoff."
           onSubmit={handleSetHardDate}
           onCancel={() => setShowSetHardDate(false)}
           loading={actionLoading === 'set_hard_date'}

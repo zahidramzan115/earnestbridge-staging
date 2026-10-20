@@ -13,7 +13,8 @@ import { createServerClient } from '@supabase/ssr';
 // Behavior:
 //   IF cycle 1 exists:
 //     UPDATE only deposit_goes_hard_date (and recalculate
-//     option_exercise_deadline via fn_subtract_business_days).
+//     option_exercise_deadline via fn_option_deadline_from_hard_date:
+//     Hard Date minus exactly 2 calendar days).
 //   IF cycle 1 does NOT exist:
 //     INSERT a new cycle 1 row using the same safe creation
 //     path as POST /api/admin/option-cycles, but WITHOUT
@@ -469,17 +470,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── Calculate Option Exercise Deadline via canonical RPC ──────────────────
+  // ── Calculate Option Exercise Deadline via canonical RPC (2 calendar days) ─
   const { data: deadlineResult, error: calcError } = await supabase
-    .rpc('fn_subtract_business_days', {
-      p_start_date: deposit_goes_hard_date,
-      p_n: 2,
+    .rpc('fn_option_deadline_from_hard_date', {
+      p_hard_date: deposit_goes_hard_date,
     });
 
   if (calcError) {
-    if (calcError.message?.includes('Business holiday calendar unavailable')) {
-      return NextResponse.json({ error: calcError.message }, { status: 422 });
-    }
     return NextResponse.json({
       error: 'Failed to calculate Option Exercise Deadline: ' + calcError.message,
     }, { status: 500 });
