@@ -6,7 +6,11 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import CreateDealModal from './CreateDealModal';
 
-type AppStatus = 'application' | 'under_review' | 'approved' | 'in_progress' | 'funded' | 'closed' | 'rejected';
+// Canonical statuses (the only values that may be selected as a NEW target).
+type CanonicalStatus = 'application' | 'under_review' | 'approved' | 'rejected' | 'dead' | 'funded' | 'closed';
+// Legacy values may still exist as CURRENT values until the later data migration.
+type LegacyStatus = 'submitted' | 'draft' | 'in_progress' | 'in_review' | 'conditionally_approved' | 'expired';
+type AppStatus = CanonicalStatus | LegacyStatus;
 
 interface BorrowerApplication {
   id: string;
@@ -29,7 +33,6 @@ interface BorrowerApplication {
   created_at: string;
   identity_verified: boolean;
   days_to_funding?: number | null;
-  deal_workflow_stage?: number | null;
   w9_signed?: boolean;
   mou_signed?: boolean;
   option_agreement_signed?: boolean;
@@ -41,45 +44,86 @@ interface BorrowerApplication {
   crm_deal_contacts?: { contact_id: string }[] | null;
 }
 
-const ALL_STATUSES: AppStatus[] = ['application', 'under_review', 'approved', 'in_progress', 'funded', 'closed', 'rejected'];
+// Single canonical target list (dropdown options).
+const CANONICAL_STATUSES: CanonicalStatus[] = ['application', 'under_review', 'approved', 'rejected', 'dead', 'funded', 'closed'];
 
-// ─── 6-Stage Deal Flow ────────────────────────────────────────────────────────
-
-const DEAL_STEPS = [
-  { step: 1,  key: 'application',   label: 'Application',   group: 'application' },
-  { step: 2,  key: 'under_review',  label: 'Under Review',  group: 'application' },
-  { step: 3,  key: 'approved',      label: 'Approved',      group: 'deal' },
-  { step: 4,  key: 'in_progress',   label: 'In Progress',   group: 'deal' },
-  { step: 5,  key: 'funded',        label: 'Funded',        group: 'deal' },
-  { step: 6,  key: 'closed',        label: 'Closed',        group: 'deal' },
-];
-
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; icon: string }> = {
-  application:  { label: 'Application',  color: 'text-gray-600',    bg: 'bg-gray-100',    border: 'border-gray-200',    icon: 'DocumentTextIcon' },
-  under_review: { label: 'Under Review', color: 'text-amber-700',   bg: 'bg-amber-100',   border: 'border-amber-200',   icon: 'MagnifyingGlassIcon' },
-  approved:     { label: 'Approved',     color: 'text-green-700',   bg: 'bg-green-100',   border: 'border-green-200',   icon: 'CheckCircleIcon' },
-  in_progress:  { label: 'In Progress',  color: 'text-blue-700',    bg: 'bg-blue-100',    border: 'border-blue-200',    icon: 'ArrowPathIcon' },
-  funded:       { label: 'Funded',       color: 'text-emerald-700', bg: 'bg-emerald-100', border: 'border-emerald-200', icon: 'BanknotesIcon' },
-  closed:       { label: 'Closed',       color: 'text-gray-700',    bg: 'bg-gray-200',    border: 'border-gray-300',    icon: 'LockClosedIcon' },
-  rejected:     { label: 'Rejected',     color: 'text-red-700',     bg: 'bg-red-100',     border: 'border-red-200',     icon: 'XCircleIcon' },
+const CANONICAL_LABELS: Record<CanonicalStatus, string> = {
+  application: 'Application Submitted',
+  under_review: 'Under Review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  dead: 'Dead',
+  funded: 'Funded',
+  closed: 'Closed',
 };
 
-const STATUS_FILTERS: { label: string; value: AppStatus | 'all' | 'application' | 'active' }[] = [
+// Display-only labels for legacy CURRENT values.
+const LEGACY_LABELS: Record<LegacyStatus, string> = {
+  submitted: 'Application Submitted',
+  draft: 'Draft',
+  in_progress: 'In Progress (Legacy)',
+  in_review: 'Under Review (Legacy)',
+  conditionally_approved: 'Conditionally Approved (Legacy)',
+  expired: 'Expired (Legacy)',
+};
+
+function getStatusLabel(status: string): string {
+  return (
+    (CANONICAL_LABELS as Record<string, string>)[status] ??
+    (LEGACY_LABELS as Record<string, string>)[status] ??
+    status
+  );
+}
+
+function isCanonicalStatus(status: string): status is CanonicalStatus {
+  return (CANONICAL_STATUSES as string[]).includes(status);
+}
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; icon: string }> = {
+  application:  { label: CANONICAL_LABELS.application,  color: 'text-gray-600',    bg: 'bg-gray-100',    border: 'border-gray-200',    icon: 'DocumentTextIcon' },
+  under_review: { label: CANONICAL_LABELS.under_review, color: 'text-amber-700',   bg: 'bg-amber-100',   border: 'border-amber-200',   icon: 'MagnifyingGlassIcon' },
+  approved:     { label: CANONICAL_LABELS.approved,     color: 'text-green-700',   bg: 'bg-green-100',   border: 'border-green-200',   icon: 'CheckCircleIcon' },
+  rejected:     { label: CANONICAL_LABELS.rejected,     color: 'text-red-700',     bg: 'bg-red-100',     border: 'border-red-200',     icon: 'XCircleIcon' },
+  dead:         { label: CANONICAL_LABELS.dead,         color: 'text-slate-700',   bg: 'bg-slate-200',   border: 'border-slate-300',   icon: 'XCircleIcon' },
+  funded:       { label: CANONICAL_LABELS.funded,       color: 'text-emerald-700', bg: 'bg-emerald-100', border: 'border-emerald-200', icon: 'BanknotesIcon' },
+  closed:       { label: CANONICAL_LABELS.closed,       color: 'text-gray-700',    bg: 'bg-gray-200',    border: 'border-gray-300',    icon: 'LockClosedIcon' },
+  // Legacy display-only
+  submitted:              { label: LEGACY_LABELS.submitted,              color: 'text-gray-600',  bg: 'bg-gray-100',  border: 'border-gray-200',  icon: 'DocumentTextIcon' },
+  draft:                  { label: LEGACY_LABELS.draft,                  color: 'text-gray-500',  bg: 'bg-gray-50',   border: 'border-gray-200',  icon: 'DocumentTextIcon' },
+  in_progress:            { label: LEGACY_LABELS.in_progress,            color: 'text-blue-700',  bg: 'bg-blue-100',  border: 'border-blue-200',  icon: 'ArrowPathIcon' },
+  in_review:              { label: LEGACY_LABELS.in_review,              color: 'text-amber-700', bg: 'bg-amber-100', border: 'border-amber-200', icon: 'MagnifyingGlassIcon' },
+  conditionally_approved: { label: LEGACY_LABELS.conditionally_approved, color: 'text-green-700', bg: 'bg-green-100', border: 'border-green-200', icon: 'CheckCircleIcon' },
+  expired:                { label: LEGACY_LABELS.expired,                color: 'text-gray-600',  bg: 'bg-gray-100',  border: 'border-gray-200',  icon: 'ClockIcon' },
+};
+
+const STATUS_FILTERS: { label: string; value: string }[] = [
   { label: 'All', value: 'all' },
-  { label: 'Application', value: 'application' },
+  { label: 'Application Submitted', value: 'application' },
   { label: 'Under Review', value: 'under_review' },
   { label: 'Approved', value: 'approved' },
-  { label: 'In Progress', value: 'in_progress' },
+  { label: 'Rejected', value: 'rejected' },
+  { label: 'Dead', value: 'dead' },
   { label: 'Funded', value: 'funded' },
   { label: 'Closed', value: 'closed' },
-  { label: 'Rejected', value: 'rejected' },
 ];
 
-const APPLICATION_STATUSES: AppStatus[] = ['application', 'under_review', 'rejected'];
+// Filter value → app_status values included. 'submitted' is legacy and is
+// temporarily included under Application Submitted until the data migration.
+const FILTER_STATUS_MAP: Record<string, AppStatus[]> = {
+  application: ['application', 'submitted'],
+  under_review: ['under_review'],
+  approved: ['approved'],
+  rejected: ['rejected'],
+  dead: ['dead'],
+  funded: ['funded'],
+  closed: ['closed'],
+};
+
+// Statuses that count as a "real Deal" for the avatar styling.
 const DEAL_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded', 'closed'];
-// Active / non-terminal pipeline Deals (same predicate as CRM Deals "Active Deals"):
-// approved, in_progress, funded. 'closed' and 'rejected' are terminal; 'application'
-// and 'under_review' are pre-deal intake.
+// Active / non-terminal pipeline Deals: approved, funded, plus legacy in_progress
+// (temporary compatibility until legacy rows are converted). 'closed', 'rejected'
+// and 'dead' are NOT active.
 const ACTIVE_PIPELINE_STATUSES: AppStatus[] = ['approved', 'in_progress', 'funded'];
 // Requested EMD Pipeline: all non-purged Deals with no funded EMD, regardless of app_status.
 
@@ -141,46 +185,37 @@ function getDaysUntil(dateStr: string | null | undefined): number | null {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
-function getWorkflowStep(deal: BorrowerApplication): number {
-  return deal.deal_workflow_stage ?? 0;
-}
-
-function WorkflowStageSelector({
+function DealStatusSelector({
   deal,
   onUpdate,
   disabled,
 }: {
   deal: BorrowerApplication;
-  onUpdate: (id: string, newStage: number, newStatus: AppStatus) => void;
+  onUpdate: (id: string, newStatus: CanonicalStatus) => void;
   disabled: boolean;
 }) {
-  const currentStep = deal.deal_workflow_stage ?? 0;
-
-  const stageToStatus = (stage: number): AppStatus => {
-    const map: Record<number, AppStatus> = {
-      1: 'application',
-      2: 'under_review',
-      3: 'approved',
-      4: 'in_progress',
-      5: 'funded',
-      6: 'closed',
-    };
-    return map[stage] ?? deal.app_status;
-  };
+  const current = String(deal.app_status);
+  const currentIsCanonical = isCanonicalStatus(current);
 
   return (
     <select
-      value={currentStep}
+      value={current}
       disabled={disabled}
+      aria-label="Deal status"
       onChange={e => {
-        const newStage = Number(e.target.value);
-        onUpdate(deal.id, newStage, stageToStatus(newStage));
+        const next = e.target.value;
+        if (isCanonicalStatus(next) && next !== current) onUpdate(deal.id, next);
       }}
       className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700 outline-none focus:ring-2 focus:ring-eb-green-900/20 focus:border-eb-green-900 disabled:opacity-50"
     >
-      {DEAL_STEPS.map(s => (
-        <option key={s.key} value={s.step}>
-          {s.step}. {s.label}
+      {!currentIsCanonical && (
+        <option value={current} disabled>
+          {getStatusLabel(current)}
+        </option>
+      )}
+      {CANONICAL_STATUSES.map(s => (
+        <option key={s} value={s}>
+          {CANONICAL_LABELS[s]}
         </option>
       ))}
     </select>
@@ -202,7 +237,10 @@ export default function AdminDealsContent() {
   const [hardDateByDeal, setHardDateByDeal] = useState<Record<string, string>>({});
   // application_id → most recently created invoice id
   const [latestInvoiceByDeal, setLatestInvoiceByDeal] = useState<Record<string, string>>({});
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  // Per-row status mutation lock: synchronous ref guards against double-submit,
+  // state drives disabled UI for only the affected row.
+  const statusLockRef = useRef<Set<string>>(new Set());
+  const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const { isSuperAdmin } = useAuth();
   const canPurge = isSuperAdmin();
@@ -314,39 +352,74 @@ export default function AdminDealsContent() {
 
   useEffect(() => { fetchDeals(); }, [fetchDeals]);
 
-  const handleWorkflowUpdate = async (id: string, newStage: number, newStatus: AppStatus) => {
-    setUpdatingId(id);
+  // Reload the authoritative app_status for a single Deal (used after a 409).
+  const refreshDealStatus = useCallback(async (id: string) => {
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('borrower_applications')
-        .update({ deal_workflow_stage: newStage, app_status: newStatus })
-        .eq('id', id);
-      if (!error) {
-        setDeals(prev => prev.map(d => d.id === id ? { ...d, deal_workflow_stage: newStage, app_status: newStatus } : d));
-
-        // ── Fire transactional email on key stage transitions ──────────────────
-        const EMAIL_STAGES: AppStatus[] = ['application', 'under_review', 'approved', 'funded'];
-        if (EMAIL_STAGES.includes(newStatus)) {
-          const deal = deals.find(d => d.id === id);
-          if (deal?.email) {
-            // Fire-and-forget — never block the UI
-            fetch('/api/send-status-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                borrowerEmail: deal.email,
-                borrowerFirstName: deal.first_name,
-                borrowerLastName: deal.last_name,
-                newStatus,
-                propertyAddress: deal.property_address ?? '',
-                milestoneLabel: DEAL_STEPS.find(s => s.key === newStatus)?.label ?? '',
-              }),
-            }).catch(() => { /* non-fatal */ });
-          }
-        }
+        .select('id, app_status')
+        .eq('id', id)
+        .is('purged_at', null)
+        .maybeSingle();
+      if (!error && data) {
+        const fresh = data as unknown as { id: string; app_status: AppStatus };
+        setDeals(prev => prev.map(d => d.id === id ? { ...d, app_status: fresh.app_status } : d));
+      } else {
+        await fetchDeals();
       }
-    } catch { /* silent */ } finally {
-      setUpdatingId(null);
+    } catch {
+      await fetchDeals();
+    }
+  }, [supabase, fetchDeals]);
+
+  const handleStatusUpdate = async (id: string, newStatus: CanonicalStatus) => {
+    if (statusLockRef.current.has(id)) return;
+    statusLockRef.current.add(id);
+    setUpdatingIds(prev => new Set(prev).add(id));
+    try {
+      const res = await fetch(`/api/admin/deals/${id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        const json = await res.json().catch(() => null) as { status?: string; updatedAt?: string | null; changed?: boolean } | null;
+        const serverStatus = json?.status;
+        if (serverStatus) {
+          setDeals(prev => prev.map(d => d.id === id ? { ...d, app_status: serverStatus as AppStatus } : d));
+        } else {
+          await refreshDealStatus(id);
+        }
+        if (json?.changed === false) {
+          showToast('success', 'Deal status is already up to date.');
+        } else {
+          showToast('success', `Deal status updated to ${getStatusLabel(serverStatus ?? newStatus)}.`);
+        }
+      } else if (res.status === 409) {
+        showToast('error', 'Deal status changed elsewhere. Refreshing the latest status.');
+        await refreshDealStatus(id);
+      } else if (res.status === 401) {
+        showToast('error', 'Your session has expired. Please sign in again.');
+      } else if (res.status === 403) {
+        showToast('error', 'You do not have permission to change Deal status.');
+      } else if (res.status === 404) {
+        showToast('error', 'Deal not found. It may have been removed. Refreshing the list.');
+        await fetchDeals();
+      } else if (res.status === 400) {
+        const j = await res.json().catch(() => null) as { error?: string } | null;
+        showToast('error', j?.error || 'Invalid status request.');
+      } else {
+        showToast('error', 'Could not update Deal status due to a server error. Please try again.');
+      }
+    } catch {
+      showToast('error', 'Network error. The status was not changed. Please try again.');
+    } finally {
+      statusLockRef.current.delete(id);
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -405,11 +478,10 @@ export default function AdminDealsContent() {
 
   const filtered = useMemo(() => {
     let data = [...deals];
-    if (filterValue === 'application') data = data.filter(d => APPLICATION_STATUSES.includes(d.app_status));
-    else if (filterValue === 'funded') data = data.filter(d => d.app_status === 'funded');
-    else if (filterValue === 'closed') data = data.filter(d => d.app_status === 'closed');
-    else if (filterValue === 'rejected') data = data.filter(d => d.app_status === 'rejected');
-    else if (filterValue !== 'all') data = data.filter(d => d.app_status === filterValue);
+    if (filterValue !== 'all') {
+      const allowed = FILTER_STATUS_MAP[filterValue] ?? [filterValue as AppStatus];
+      data = data.filter(d => allowed.includes(d.app_status));
+    }
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -429,16 +501,13 @@ export default function AdminDealsContent() {
     return data;
   }, [deals, filterValue, searchQuery, ownerFilter, portalFilter]);
 
-  const counts = useMemo(() => ({
-    all: deals.length,
-    application: deals.filter(d => APPLICATION_STATUSES.includes(d.app_status)).length,
-    under_review: deals.filter(d => d.app_status === 'under_review').length,
-    approved: deals.filter(d => d.app_status === 'approved').length,
-    in_progress: deals.filter(d => d.app_status === 'in_progress').length,
-    funded: deals.filter(d => d.app_status === 'funded').length,
-    closed: deals.filter(d => d.app_status === 'closed').length,
-    rejected: deals.filter(d => d.app_status === 'rejected').length,
-  }), [deals]);
+  const counts = useMemo(() => {
+    const result: Record<string, number> = { all: deals.length };
+    Object.entries(FILTER_STATUS_MAP).forEach(([key, statuses]) => {
+      result[key] = deals.filter(d => statuses.includes(d.app_status)).length;
+    });
+    return result;
+  }, [deals]);
 
   const activeDeals = useMemo(() => deals.filter(d => ACTIVE_PIPELINE_STATUSES.includes(d.app_status)), [deals]);
   // Requested EMD Pipeline: full non-purged Deal list (purged_at IS NULL enforced in the fetch),
@@ -492,7 +561,7 @@ export default function AdminDealsContent() {
         <div className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm">
           <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Active Deals</p>
           <p className="text-2xl font-display font-700 text-gray-900">{activeDeals.length}</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Approved · In Progress · Funded</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Approved · Funded</p>
         </div>
         <div className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm">
           <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Requested EMD Pipeline</p>
@@ -584,9 +653,8 @@ export default function AdminDealsContent() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(deal => {
-                  const cfg = STATUS_CONFIG[deal.app_status] ?? STATUS_CONFIG.application;
+                  const cfg = STATUS_CONFIG[deal.app_status] ?? { label: getStatusLabel(String(deal.app_status)), color: 'text-gray-600', bg: 'bg-gray-100', border: 'border-gray-200', icon: 'DocumentTextIcon' };
                   const isActiveDeal = DEAL_STATUSES.includes(deal.app_status);
-                  const currentStep = getWorkflowStep(deal);
                   const hardDate = hardDateByDeal[deal.id];
                   const latestInvoiceId = latestInvoiceByDeal[deal.id];
 
@@ -632,10 +700,10 @@ export default function AdminDealsContent() {
                           </p>
                         </td>
                         <td className="px-4 py-3.5">
-                          <WorkflowStageSelector
+                          <DealStatusSelector
                             deal={deal}
-                            onUpdate={handleWorkflowUpdate}
-                            disabled={updatingId === deal.id}
+                            onUpdate={handleStatusUpdate}
+                            disabled={updatingIds.has(deal.id)}
                           />
                           <div className="flex items-center gap-1.5 mt-1.5">
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-display font-700 border ${cfg.color} ${cfg.bg} ${cfg.border}`}>
