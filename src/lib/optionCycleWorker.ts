@@ -433,10 +433,14 @@ async function logActivity(
 //   option_cycle_automation_log.event_type = 'auto_close'
 //   option_cycle_automation_log.status     = 'completed'
 //   crm_deal_option_cycles.status          = 'missed'
-//   borrower_applications.app_status       = 'closed'
 //
-// This prevents sending closeout notices for manual Deal closures that
-// have no corresponding completed auto_close automation event.
+// Deal app_status is intentionally NOT part of the predicate: a missed
+// Option Cycle is independent of the Deal's status (historical records may be
+// missed + closed; newer records may be missed + funded).
+//
+// The completed auto_close log + missed cycle are the authoritative evidence
+// that an automated Option Exercise Deadline miss occurred. A manual Deal
+// closure never produces a completed auto_close log row.
 //
 // For each qualifying record, independently processes:
 //   client_closeout_notice  — dedupe key: option:<cycle_id>:<deadline>:client_closeout_notice:<client_email>
@@ -467,8 +471,8 @@ async function reconcileCompletedAutoCloseNotifications(
 
   // ── Fetch all completed auto_close log rows ─────────────────────────────
   // Join to cycle and deal to verify canonical evidence.
-  // We only process rows where BOTH the cycle is missed AND the deal is closed.
-  // This prevents sending closeout notices for manual closures.
+  // We only process rows where the cycle is missed (Deal status is not required).
+  // A completed auto_close log row is the evidence of an automated miss.
   const { data: completedLogs, error: logsError } = await supabase
     .from('option_cycle_automation_log')
     .select(`
@@ -511,12 +515,11 @@ async function reconcileCompletedAutoCloseNotifications(
     const deal  = dealMap[log.application_id];
 
     // ── Canonical evidence check ──────────────────────────────────────────
-    // Must have: cycle = missed AND deal = closed.
-    // If either is missing or in wrong state, skip — this is not a valid
-    // auto-close candidate (could be a manual closure or data inconsistency).
+    // Must have: completed auto_close log (selected above) AND cycle = missed.
+    // Deal app_status is NOT checked — works for historical missed + closed
+    // and future missed + funded records. Missing/purged records are skipped.
     if (!cycle || !deal) continue;
     if (cycle.status !== 'missed') continue;
-    if (deal.app_status !== 'closed') continue;
 
     const deadline    = log.deadline_snapshot ?? cycle.option_exercise_deadline;
     const dealDisplay = deal.company_name || deal.property_address || log.application_id;
@@ -1071,7 +1074,7 @@ export async function runOptionCycleAutomation(opts: {
         results.push({
           cycleId: cycle.id, applicationId: cycle.application_id,
           dealDisplay, action: 'auto_close',
-          outcome: 'already_done', reason: 'Dedupe: already closed',
+          outcome: 'already_done', reason: 'Dedupe: auto-close already processed',
         });
         continue;
       }
@@ -1133,12 +1136,12 @@ export async function runOptionCycleAutomation(opts: {
         // execute_option_cycle_auto_close() performs ALL of the following
         // inside ONE PostgreSQL transaction:
         //   a. cycle → missed
-        //   b. deal  → closed
-        //   c. auto_close log → completed
-        //   d. activity: option_cycle_missed inserted
-        //   e. activity: status_change inserted
+        //   b. auto_close log → completed
+        //   c. activity: option_cycle_missed inserted
+        //   (the current RPC may also apply legacy Deal-status side effects;
+        //    the worker no longer depends on them)
         //
-        // Either ALL five writes commit or NONE do.
+        // Either ALL RPC writes commit or NONE do.
         // The canonical cutoff timestamp is passed from the worker so that
         // no timezone logic is reproduced in SQL.
         // p_automation_log_id is verified inside the RPC before any write.
@@ -1191,10 +1194,8 @@ export async function runOptionCycleAutomation(opts: {
         // ── RPC returned 'success' ─────────────────────────────────────────
         // The following are now committed atomically inside the RPC:
         //   - cycle.status = 'missed'
-        //   - deal.app_status = 'closed'
         //   - auto_close log.status = 'completed'
         //   - activity: option_cycle_missed
-        //   - activity: status_change
         //
         // Closeout emails are processed by reconcileCompletedAutoCloseNotifications()
         // which runs at the end of this worker execution and on every future run.
@@ -1203,7 +1204,7 @@ export async function runOptionCycleAutomation(opts: {
         results.push({
           cycleId: cycle.id, applicationId: cycle.application_id,
           dealDisplay, action: 'auto_close', outcome: 'closed',
-          reason: `Cycle marked missed, Deal closed (atomic). Deadline: ${deadline}`,
+          reason: `Option Cycle marked missed (atomic). Deadline: ${deadline}`,
         });
       }
     }
