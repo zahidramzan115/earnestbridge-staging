@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { checkAdmin } from '@/lib/server/adminAuth';
 import { createServiceRoleClient, validateServerEnv } from '@/lib/server/adminUsers';
 import { createSignatureEnvelope, getDocuSignAccessToken, type SignatureFile } from '@/lib/server/docusign';
+import { syncEnvelopeFromDocuSign } from '@/lib/server/docusignConnect';
 import { sendOutboundEmail } from '@/lib/server/outboundEmail';
 import { stampClientSignature } from '@/lib/server/stampSignatureAnchors';
 import {
@@ -14,7 +15,7 @@ import {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = 'borrower-documents';
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at, signed_file_path';
+const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at, signed_file_path, docusign_envelope_id';
 
 export interface GeneratedDocumentSpec {
   documentType: 'option_agreement' | 'affidavit' | 'operating_agreement' | 'written_consent';
@@ -29,6 +30,23 @@ export interface GeneratedDocumentSpec {
 function serviceClient() {
   const env = validateServerEnv();
   return createServiceRoleClient(env.supabaseUrl, env.serviceRoleKey);
+}
+
+export async function refreshSignedRow<T extends { status: string; docusign_envelope_id?: string | null }>(
+  supabase: ReturnType<typeof serviceClient>,
+  dealId: string,
+  documentType: string,
+  row: T
+): Promise<T> {
+  if (row.status !== 'sent_for_signature' || !row.docusign_envelope_id) return row;
+  await syncEnvelopeFromDocuSign(row.docusign_envelope_id);
+  const { data } = await supabase
+    .from('deal_documents')
+    .select(DOCUMENT_COLUMNS)
+    .eq('application_id', dealId)
+    .eq('document_type', documentType)
+    .maybeSingle();
+  return (data as T | null) ?? row;
 }
 
 async function signedUrl(supabase: ReturnType<typeof serviceClient>, storagePath: string | null) {
@@ -114,8 +132,9 @@ export async function getGeneratedDocument(
     return NextResponse.json({ error: `Could not load the ${spec.label}.` }, { status: 500 });
   }
   if (!data) return NextResponse.json({ document: null });
+  const row = await refreshSignedRow(access.supabase, access.id, spec.documentType, data);
   return NextResponse.json({
-    document: await presented(access.supabase, data),
+    document: await presented(access.supabase, row),
   });
 }
 

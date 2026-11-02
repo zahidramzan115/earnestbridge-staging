@@ -4,6 +4,7 @@ import { handleDocuSignConnect } from '@/lib/server/docusignConnect';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 export async function GET() {
   return NextResponse.json({ ok: true });
@@ -12,18 +13,21 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   if (!connectHmacValid(rawBody, request)) {
+    console.error('[docusign-connect] hmac rejected');
     return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
   }
 
   let payload: Record<string, unknown> = {};
-  try {
-    payload = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+  if (rawBody.trim().startsWith('{')) {
+    try {
+      payload = JSON.parse(rawBody) as Record<string, unknown>;
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+    }
   }
 
   try {
-    const result = await handleDocuSignConnect(payload);
+    const result = await handleDocuSignConnect(payload, rawBody);
     if ('ok' in result) return NextResponse.json({ ok: true });
     return NextResponse.json({ error: result.error }, { status: result.status });
   } catch (error) {

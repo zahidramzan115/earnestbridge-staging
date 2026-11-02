@@ -214,9 +214,15 @@ export async function createSignatureEnvelope(input: {
 }
 
 function hmacMatches(secret: string, rawBody: string, signature: string): boolean {
-  const digestHex = createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
-  const digestB64 = createHmac('sha256', secret).update(rawBody, 'utf8').digest('base64');
-  return safeEqual(signature, digestHex) || safeEqual(signature, digestB64);
+  const keys = [secret];
+  if (/^[0-9a-fA-F]+$/.test(secret) && secret.length % 2 === 0) {
+    keys.push(Buffer.from(secret, 'hex').toString('utf8'));
+  }
+  return keys.some((key) => {
+    const digestHex = createHmac('sha256', key).update(rawBody, 'utf8').digest('hex');
+    const digestB64 = createHmac('sha256', key).update(rawBody, 'utf8').digest('base64');
+    return safeEqual(signature, digestHex) || safeEqual(signature, digestB64);
+  });
 }
 
 function safeEqual(left: string, right: string): boolean {
@@ -234,6 +240,17 @@ export function connectHmacValid(rawBody: string, request: Request): boolean {
     request.headers.get('x-docusign-signature-2'),
   ].filter((value): value is string => Boolean(value));
   return signatures.some((signature) => hmacMatches(secret, rawBody, signature));
+}
+
+export async function getEnvelopeStatus(envelopeId: string): Promise<string> {
+  const settings = config();
+  const accessToken = await getDocuSignAccessToken();
+  const response = await fetch(
+    `${settings.basePath}/v2.1/accounts/${settings.accountId}/envelopes/${encodeURIComponent(envelopeId)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const body = await response.json().catch(() => ({}));
+  return typeof body.status === 'string' ? body.status.toLowerCase() : '';
 }
 
 export async function listEnvelopeDocuments(

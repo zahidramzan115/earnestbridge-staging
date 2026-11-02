@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { checkAdmin } from '@/lib/server/adminAuth';
 import { createServiceRoleClient, validateServerEnv } from '@/lib/server/adminUsers';
+import { refreshSignedRow } from '@/lib/server/generatedDealDocument';
 import { missingMouLabels, renderMou, type MouSourceDeal } from '@/lib/server/mouTemplate';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +26,7 @@ async function signedUrl(supabase: ReturnType<typeof serviceClient>, storagePath
   return data?.signedUrl ?? null;
 }
 
-const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at, signed_file_path';
+const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at, signed_file_path, docusign_envelope_id';
 
 function presentDocument(
   row: {
@@ -91,11 +92,12 @@ export async function GET(
     return NextResponse.json({ document: null });
   }
 
+  const row = await refreshSignedRow(supabase, id, 'mou', data);
   return NextResponse.json({
     document: presentDocument(
-      data,
-      await signedUrl(supabase, data.storage_path),
-      await signedUrl(supabase, data.signed_file_path)
+      row,
+      await signedUrl(supabase, row.storage_path),
+      await signedUrl(supabase, row.signed_file_path)
     ),
   });
 }

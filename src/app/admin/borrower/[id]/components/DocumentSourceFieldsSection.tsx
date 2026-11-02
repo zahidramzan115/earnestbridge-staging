@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '@/components/ui/AppIcon';
 import { AFFIDAVIT_FIELD_KEYS } from '@/lib/documents/affidavitFields';
 import { MOU_FIELD_KEYS } from '@/lib/documents/mouFields';
@@ -164,31 +164,28 @@ export default function DocumentSourceFieldsSection({
     setValues(emptyValues(deal));
   }, [deal]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDocuments = useCallback(async () => {
     const loadOne = async (path: string, setDoc: (document: MouDocument | null) => void) => {
       try {
         const response = await fetch(`/api/admin/deals/${deal.id}/documents/${path}`);
         const body = await response.json().catch(() => ({}));
-        if (!cancelled && response.ok) setDoc(body.document ?? null);
+        if (response.ok) setDoc(body.document ?? null);
       } catch {
-        if (!cancelled) setDoc(null);
+        setDoc(null);
       }
     };
-    const load = async () => {
-      await Promise.all([
-        loadOne('mou', setMou),
-        loadOne('option-agreement', setOptionDoc),
-        loadOne('affidavit', setAffidavitDoc),
-        loadOne('operating-agreement', setOperatingDoc),
-        loadOne('written-consent', setConsentDoc),
-      ]);
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
+    await Promise.all([
+      loadOne('mou', setMou),
+      loadOne('option-agreement', setOptionDoc),
+      loadOne('affidavit', setAffidavitDoc),
+      loadOne('operating-agreement', setOperatingDoc),
+      loadOne('written-consent', setConsentDoc),
+    ]);
   }, [deal.id]);
+
+  useEffect(() => {
+    void loadDocuments();
+  }, [loadDocuments]);
 
   const missing = useMemo(
     () => FIELDS.filter((field) => MOU_FIELD_KEYS.has(field.key) && isEmpty(values[field.key])).map((field) => field.label),
@@ -220,6 +217,14 @@ export default function DocumentSourceFieldsSection({
     return { missingLabels, unsaved, ready: missingLabels.length === 0 && !unsaved };
   }, [deal, values]);
   const allDocuments = [mou, optionDoc, affidavitDoc, operatingDoc, consentDoc];
+  const waitingForSignature = allDocuments.some((document) => document?.status === 'sent_for_signature');
+  useEffect(() => {
+    if (!waitingForSignature) return undefined;
+    const timer = window.setInterval(() => {
+      void loadDocuments();
+    }, 12000);
+    return () => window.clearInterval(timer);
+  }, [waitingForSignature, loadDocuments]);
   const controlsLocked = saving || generating || approving || sending || markingClientApproved || signing || Boolean(extraBusy);
   const hasApprovedDocument = allDocuments.some((document) => document?.status === 'approved');
   const hasSentDocument = allDocuments.some((document) => document?.status === 'sent_to_client');
