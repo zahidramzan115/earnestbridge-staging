@@ -1,6 +1,14 @@
 # Node modules
 node_modules/
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Local requirements notes
+/requirements/
+
 # Next.js build output
 .next/
 out/

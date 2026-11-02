@@ -421,11 +421,12 @@ export default function CreateDealModal({
 
       // Associate CRM contact with the deal
       if (form.crmContactId && newDeal) {
-        await supabase.from('crm_deal_contacts').insert({
+        const { error: linkError } = await supabase.from('crm_deal_contacts').insert({
           deal_id: newDeal.id,
           contact_id: form.crmContactId,
           role: 'primary',
-        }).onConflict('deal_id,contact_id').ignore();
+        });
+        if (linkError && linkError.code !== '23505') throw linkError;
 
         // Log activity on the CRM contact
         await supabase.from('crm_activities').insert({

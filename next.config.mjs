@@ -18,6 +18,14 @@ const nextConfig = {
     minimumCacheTTL: 60,
   },
 
+  outputFileTracingIncludes: {
+    '/api/admin/deals/**': [
+      './templates/MOU.docx',
+      './templates/Option-Agreement-EMD-Program.docx',
+      './templates/EarnestBridge_Affidavit_Ownership_and_Authority.docx',
+    ],
+  },
+
   async redirects() {
     return [
       {

@@ -14,6 +14,7 @@ import FundingOptionSection from './FundingOptionSection';
 import FundingBillingSection from './FundingBillingSection';
 import DealInvoicesSection from './DealInvoicesSection';
 import DealCrmContactsSection from './DealCrmContactsSection';
+import DocumentSourceFieldsSection from './DocumentSourceFieldsSection';
 import EmailAttachmentPicker, { AttachmentDescriptor, cleanupAttachments } from '@/components/EmailAttachmentPicker';
 
 type AppStatus = 'draft' | 'application' | 'submitted' | 'under_review' | 'in_review' | 'approved' | 'conditionally_approved' | 'in_progress' | 'funded' | 'closed' | 'rejected' | 'dead' | 'expired';
@@ -47,6 +48,19 @@ interface BorrowerApplication {
   transaction_description?: string | null;
   llc_name?: string | null;
   llc_state?: string | null;
+  client_legal_name?: string | null;
+  escrow_agent?: string | null;
+  admin_fee?: number | null;
+  deal_fee?: number | null;
+  option_term?: string | null;
+  client_notice_address?: string | null;
+  client_representative_name?: string | null;
+  client_notice_email?: string | null;
+  client_signatory_name?: string | null;
+  client_signatory_title?: string | null;
+  psa_title?: string | null;
+  mou_effective_date?: string | null;
+  option_effective_date?: string | null;
   llc_ein?: string | null;
   attorney_name?: string | null;
   attorney_email?: string | null;
@@ -3050,7 +3064,7 @@ const BorrowerDetailContent: React.FC = () => {
     { id: 'funding', label: 'Funding & Option', icon: 'BanknotesIcon' },
     { id: 'invoices', label: 'Invoices', icon: 'DocumentTextIcon' },
     { id: 'deadlines', label: 'Deadlines', icon: 'CalendarDaysIcon' },
-    { id: 'compliance', label: 'Compliance Docs', icon: 'ShieldCheckIcon' },
+    { id: 'compliance', label: 'Document Source of Truth', icon: 'ShieldCheckIcon' },
     { id: 'documents', label: 'All Documents', icon: 'FolderOpenIcon' },
     { id: 'activity', label: 'Activity', icon: 'ClockIcon' },
     { id: 'feedback', label: 'Send Feedback', icon: 'ChatBubbleLeftEllipsisIcon' },
@@ -3783,6 +3797,11 @@ const BorrowerDetailContent: React.FC = () => {
       )}
 
       {activeTab === 'compliance' && (
+        <div className="space-y-6">
+          <DocumentSourceFieldsSection
+            deal={application}
+            onSaved={(saved) => setApplication((current) => (current ? { ...current, ...saved } : current))}
+          />
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <AdminComplianceDocs
             userId={application.user_id}
@@ -3792,6 +3811,7 @@ const BorrowerDetailContent: React.FC = () => {
             borrowerLastName={application.last_name}
             propertyAddress={application.property_address ?? undefined}
           />
+        </div>
         </div>
       )}
 
