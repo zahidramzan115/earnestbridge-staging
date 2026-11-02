@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { createSign } from 'crypto';
+import { createHmac, createSign, timingSafeEqual } from 'crypto';
 import path from 'path';
 
 type DocuSignConfig = {
@@ -176,4 +176,69 @@ export async function createSignatureEnvelope(input: {
     throw new Error('DocuSign could not send the documents.');
   }
   return body.envelopeId;
+}
+
+function hmacMatches(secret: string, rawBody: string, signature: string): boolean {
+  const digestHex = createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
+  const digestB64 = createHmac('sha256', secret).update(rawBody, 'utf8').digest('base64');
+  return safeEqual(signature, digestHex) || safeEqual(signature, digestB64);
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+export function connectHmacValid(rawBody: string, request: Request): boolean {
+  const secret = process.env.DOCUSIGN_CONNECT_HMAC_SECRET?.trim() ?? '';
+  if (!secret) return true;
+  const signatures = [
+    request.headers.get('x-docusign-signature-1'),
+    request.headers.get('x-docusign-signature-2'),
+  ].filter((value): value is string => Boolean(value));
+  return signatures.some((signature) => hmacMatches(secret, rawBody, signature));
+}
+
+export async function listEnvelopeDocuments(
+  accessToken: string,
+  envelopeId: string
+): Promise<Array<{ documentId: string; name: string; type?: string }>> {
+  const settings = config();
+  const response = await fetch(
+    `${settings.basePath}/v2.1/accounts/${settings.accountId}/envelopes/${envelopeId}/documents`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !Array.isArray(body.envelopeDocuments)) {
+    throw new Error('Could not load the signed documents.');
+  }
+  return body.envelopeDocuments
+    .map((item: { documentId?: string; name?: string; type?: string }) => ({
+      documentId: String(item.documentId ?? ''),
+      name: String(item.name ?? ''),
+      type: item.type,
+    }))
+    .filter((item: { documentId: string }) => item.documentId);
+}
+
+export async function downloadEnvelopeFile(
+  accessToken: string,
+  envelopeId: string,
+  documentId: string
+): Promise<Buffer> {
+  const settings = config();
+  const response = await fetch(
+    `${settings.basePath}/v2.1/accounts/${settings.accountId}/envelopes/${envelopeId}/documents/${documentId}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!response.ok) throw new Error('Could not download the signed document.');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length < 5) throw new Error('Could not download the signed document.');
+  return bytes;
+}
+
+export function expectedConnectAccountId(): string {
+  return requiredEnv('DOCUSIGN_ACCOUNT_ID');
 }

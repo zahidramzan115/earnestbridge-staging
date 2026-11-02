@@ -15,7 +15,7 @@ import {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = 'borrower-documents';
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at';
+const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at, signed_file_path';
 
 export interface GeneratedDocumentSpec {
   documentType: 'option_agreement' | 'affidavit' | 'operating_agreement' | 'written_consent';
@@ -39,6 +39,17 @@ async function signedUrl(supabase: ReturnType<typeof serviceClient>, storagePath
   return data?.signedUrl ?? null;
 }
 
+async function presented(
+  supabase: ReturnType<typeof serviceClient>,
+  row: Parameters<typeof presentDocument>[0]
+) {
+  return presentDocument(
+    row,
+    await signedUrl(supabase, row.storage_path),
+    await signedUrl(supabase, row.signed_file_path ?? null)
+  );
+}
+
 function presentDocument(
   row: {
     status: string;
@@ -48,14 +59,17 @@ function presentDocument(
     sent_to_email?: string | null;
     sent_at?: string | null;
     client_approved_at?: string | null;
+    signed_file_path?: string | null;
   },
-  downloadUrl: string | null
+  downloadUrl: string | null,
+  signedDownloadUrl: string | null = null
 ) {
   return {
     status: row.status,
     version_number: row.version_number,
     file_name: row.file_name,
     download_url: downloadUrl,
+    signed_download_url: signedDownloadUrl,
     sent_to_email: row.sent_to_email ?? null,
     sent_at: row.sent_at ?? null,
     client_approved_at: row.client_approved_at ?? null,
@@ -102,7 +116,7 @@ export async function getGeneratedDocument(
   }
   if (!data) return NextResponse.json({ document: null });
   return NextResponse.json({
-    document: presentDocument(data, await signedUrl(access.supabase, data.storage_path)),
+    document: await presented(access.supabase, data),
   });
 }
 
@@ -199,7 +213,7 @@ export async function generateGeneratedDocument(
   }
 
   return NextResponse.json({
-    document: presentDocument(write.data, await signedUrl(supabase, write.data.storage_path)),
+    document: await presented(supabase, write.data),
   });
 }
 
@@ -242,7 +256,7 @@ export async function approveGeneratedDocument(
   }
   if (updated) {
     return NextResponse.json({
-      document: presentDocument(updated, await signedUrl(supabase, updated.storage_path)),
+      document: await presented(supabase, updated),
     });
   }
 
@@ -372,7 +386,7 @@ export async function sendGeneratedDocument(
   }
 
   return NextResponse.json({
-    document: presentDocument(claimed, await signedUrl(supabase, claimed.storage_path)),
+    document: await presented(supabase, claimed),
   });
 }
 
@@ -503,7 +517,7 @@ export async function sendApprovedDocuments(context: { params: Promise<{ id: str
     if (!row) continue;
     documents.push({
       document_type: row.document_type,
-      ...presentDocument(row, await signedUrl(supabase, row.storage_path)),
+      ...(await presented(supabase, row)),
     });
   }
 
@@ -552,7 +566,7 @@ export async function markSentDocumentsClientApproved(context: { params: Promise
   for (const row of updated) {
     documents.push({
       document_type: row.document_type,
-      ...presentDocument(row, await signedUrl(supabase, row.storage_path)),
+      ...(await presented(supabase, row)),
     });
   }
 
@@ -674,7 +688,7 @@ export async function sendForSignature(context: { params: Promise<{ id: string }
     if (!row) continue;
     documents.push({
       document_type: row.document_type,
-      ...presentDocument(row, await signedUrl(supabase, row.storage_path)),
+      ...(await presented(supabase, row)),
     });
   }
 

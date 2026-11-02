@@ -25,7 +25,7 @@ async function signedUrl(supabase: ReturnType<typeof serviceClient>, storagePath
   return data?.signedUrl ?? null;
 }
 
-const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at';
+const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at, signed_file_path';
 
 function presentDocument(
   row: {
@@ -36,14 +36,17 @@ function presentDocument(
     sent_to_email?: string | null;
     sent_at?: string | null;
     client_approved_at?: string | null;
+    signed_file_path?: string | null;
   },
-  downloadUrl: string | null
+  downloadUrl: string | null,
+  signedDownloadUrl: string | null = null
 ) {
   return {
     status: row.status,
     version_number: row.version_number,
     file_name: row.file_name,
     download_url: downloadUrl,
+    signed_download_url: signedDownloadUrl,
     sent_to_email: row.sent_to_email ?? null,
     sent_at: row.sent_at ?? null,
     client_approved_at: row.client_approved_at ?? null,
@@ -89,7 +92,11 @@ export async function GET(
   }
 
   return NextResponse.json({
-    document: presentDocument(data, await signedUrl(supabase, data.storage_path)),
+    document: presentDocument(
+      data,
+      await signedUrl(supabase, data.storage_path),
+      await signedUrl(supabase, data.signed_file_path)
+    ),
   });
 }
 

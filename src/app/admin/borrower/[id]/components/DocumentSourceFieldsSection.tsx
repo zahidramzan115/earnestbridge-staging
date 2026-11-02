@@ -97,6 +97,7 @@ interface MouDocument {
   sent_to_email?: string | null;
   sent_at?: string | null;
   client_approved_at?: string | null;
+  signed_download_url?: string | null;
   document_type?: string;
 }
 
@@ -106,6 +107,7 @@ function statusLabel(status: string): string {
   if (status === 'sent_to_client') return 'Sent to client';
   if (status === 'client_approved') return 'Client approved';
   if (status === 'sent_for_signature') return 'Sent for signature';
+  if (status === 'signed') return 'Signed';
   return status.replace(/_/g, ' ');
 }
 
@@ -128,6 +130,7 @@ function deliveryNote(document: MouDocument | null): string | undefined {
     const signature = document.status === 'sent_for_signature' ? 'Sent for signature.' : '';
     return [sent, approved, signature].filter(Boolean).join(' ');
   }
+  if (document.status === 'signed') return [sent, 'Signed.'].filter(Boolean).join(' ');
   return undefined;
 }
 
@@ -680,6 +683,11 @@ function GeneratedFileCard({
           {document?.download_url && (
             <a href={document.download_url} className="text-xs font-display font-700 text-eb-green-900 hover:underline">
               Download
+            </a>
+          )}
+          {document?.signed_download_url && (
+            <a href={document.signed_download_url} className="text-xs font-display font-700 text-eb-green-900 hover:underline">
+              Download signed
             </a>
           )}
         </div>
