@@ -177,13 +177,16 @@ export async function generateGeneratedDocument(
 
   const { data: existing, error: existingError } = await supabase
     .from('deal_documents')
-    .select('id, version_number, storage_path')
+    .select('id, version_number, storage_path, status')
     .eq('application_id', id)
     .eq('document_type', spec.documentType)
     .maybeSingle();
 
   if (existingError) {
     return NextResponse.json({ error: `Could not generate the ${spec.label}.` }, { status: 500 });
+  }
+  if (existing?.status === 'signed') {
+    return NextResponse.json({ error: `The signed ${spec.label} cannot be regenerated.` }, { status: 409 });
   }
 
   const version = existing ? existing.version_number + 1 : 1;

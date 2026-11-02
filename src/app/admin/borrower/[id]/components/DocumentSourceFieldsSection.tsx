@@ -654,6 +654,8 @@ function GeneratedFileCard({
   onApprove: () => void;
   extra?: React.ReactNode;
 }) {
+  const signed = document?.status === 'signed';
+  const generateHint = signed ? 'This signed file cannot be regenerated.' : hint;
   return (
     <div className="mt-4 rounded-lg border border-gray-200 px-3 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -669,7 +671,7 @@ function GeneratedFileCard({
           <button
             type="button"
             onClick={onGenerate}
-            disabled={!ready || busy}
+            disabled={signed || !ready || busy}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-display font-700 rounded-lg border border-eb-green-900 text-eb-green-900 bg-white hover:bg-eb-green-50 disabled:border-gray-200 disabled:text-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed"
           >
             {generating ? 'Generating…' : document ? 'Regenerate' : 'Generate'}
@@ -697,7 +699,7 @@ function GeneratedFileCard({
           )}
         </div>
       </div>
-      <p className={`mt-2 text-[11px] ${ready ? 'text-emerald-700' : 'text-amber-800'}`}>{hint}</p>
+      <p className={`mt-2 text-[11px] ${signed || ready ? 'text-emerald-700' : 'text-amber-800'}`}>{generateHint}</p>
     </div>
   );
 }
