@@ -46,18 +46,37 @@ function privateKeyFromEnvFile(): string | null {
   }
 }
 
-function readPrivateKey(): string {
-  const fromEnv = (process.env.DOCUSIGN_RSA_PRIVATE_KEY ?? '')
-    .trim()
-    .replace(/^["']|["']$/g, '')
+function looksLikePem(value: string): boolean {
+  return value.includes('BEGIN') && value.includes('END') && value.includes('PRIVATE KEY');
+}
+
+function decodeEnvPrivateKey(raw: string): string {
+  let value = raw.trim().replace(/^["']|["']$/g, '');
+  if (!value) return '';
+  value = value
+    .replace(/\\\\n/g, '\n')
+    .replace(/\\r\\n/g, '\n')
     .replace(/\\n/g, '\n')
     .replace(/\r\n/g, '\n');
-  if (fromEnv.includes('BEGIN') && fromEnv.includes('END ') && fromEnv.includes('PRIVATE KEY')) return fromEnv;
+  if (looksLikePem(value)) return value;
+  const compact = value.replace(/\s/g, '');
+  if (/^[A-Za-z0-9+/]+=*$/.test(compact) && compact.length > 80) {
+    const decoded = Buffer.from(compact, 'base64').toString('utf8').replace(/\r\n/g, '\n').trim();
+    if (looksLikePem(decoded)) return decoded;
+  }
+  return value;
+}
+
+function readPrivateKey(): string {
+  const fromB64 = decodeEnvPrivateKey(process.env.DOCUSIGN_RSA_PRIVATE_KEY_B64 ?? '');
+  if (looksLikePem(fromB64)) return fromB64;
+  const fromEnv = decodeEnvPrivateKey(process.env.DOCUSIGN_RSA_PRIVATE_KEY ?? '');
+  if (looksLikePem(fromEnv)) return fromEnv;
   const fromFile = privateKeyFromEnvFile();
   if (fromFile) return fromFile;
-  if (fromEnv.includes('BEGIN') && !fromEnv.includes('END ')) {
+  if (fromEnv.includes('BEGIN') && !fromEnv.includes('END')) {
     throw new Error(
-      'DOCUSIGN_RSA_PRIVATE_KEY is incomplete. On Netlify paste the full key as one line, with \\n between each line of the key.'
+      'DOCUSIGN_RSA_PRIVATE_KEY is incomplete. On Netlify add DOCUSIGN_RSA_PRIVATE_KEY_B64 with the Base64 of the full key (one line).'
     );
   }
   throw new Error('DOCUSIGN_RSA_PRIVATE_KEY is not configured');
