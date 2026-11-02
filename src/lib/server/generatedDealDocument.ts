@@ -670,10 +670,10 @@ export async function sendForSignature(context: { params: Promise<{ id: string }
     console.error('[documents] signature send failed', error);
     await revertClientApproval(supabase, ids);
     const message = error instanceof Error ? error.message : '';
-    if (message.startsWith('DocuSign') || message.includes('PDF') || message.includes('signature line') || message.includes('DOCUSIGN_')) {
-      return NextResponse.json({ error: message }, { status: 500 });
-    }
-    return NextResponse.json({ error: 'Could not send the documents for signature.' }, { status: 500 });
+    return NextResponse.json(
+      { error: message || 'Could not send the documents for signature.' },
+      { status: 500 }
+    );
   }
 
   const documents = [];

@@ -47,10 +47,19 @@ function privateKeyFromEnvFile(): string | null {
 }
 
 function readPrivateKey(): string {
-  const fromEnv = (process.env.DOCUSIGN_RSA_PRIVATE_KEY ?? '').trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '\n');
+  const fromEnv = (process.env.DOCUSIGN_RSA_PRIVATE_KEY ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/\\n/g, '\n')
+    .replace(/\r\n/g, '\n');
   if (fromEnv.includes('BEGIN') && fromEnv.includes('END ') && fromEnv.includes('PRIVATE KEY')) return fromEnv;
   const fromFile = privateKeyFromEnvFile();
   if (fromFile) return fromFile;
+  if (fromEnv.includes('BEGIN') && !fromEnv.includes('END ')) {
+    throw new Error(
+      'DOCUSIGN_RSA_PRIVATE_KEY is incomplete. On Netlify paste the full key as one line, with \\n between each line of the key.'
+    );
+  }
   throw new Error('DOCUSIGN_RSA_PRIVATE_KEY is not configured');
 }
 
@@ -84,10 +93,16 @@ function assertion(settings: DocuSignConfig): string {
     scope: 'signature impersonation',
   }));
   const signingInput = `${header}.${payload}`;
-  const signer = createSign('RSA-SHA256');
-  signer.update(signingInput);
-  signer.end();
-  return `${signingInput}.${signer.sign(settings.privateKey).toString('base64url')}`;
+  try {
+    const signer = createSign('RSA-SHA256');
+    signer.update(signingInput);
+    signer.end();
+    return `${signingInput}.${signer.sign(settings.privateKey).toString('base64url')}`;
+  } catch {
+    throw new Error(
+      'DocuSign private key is invalid. On Netlify paste the full key as one line, with \\n between each line of the key.'
+    );
+  }
 }
 
 export async function getDocuSignAccessToken(): Promise<string> {
@@ -137,7 +152,7 @@ export async function createSignatureEnvelope(input: {
       status: 'sent',
       documents: input.files.map((file) => ({
         documentBase64: file.content.toString('base64'),
-        name: file.name,
+        name: `${file.name}.docx`,
         fileExtension: 'docx',
         documentId: file.documentId,
       })),
@@ -172,8 +187,9 @@ export async function createSignatureEnvelope(input: {
   const body = await response.json().catch(() => ({}));
   if (!response.ok || typeof body.envelopeId !== 'string') {
     const message = typeof body.message === 'string' ? body.message : '';
-    console.error('[docusign] envelope failed', response.status, message.slice(0, 200));
-    throw new Error('DocuSign could not send the documents.');
+    const code = typeof body.errorCode === 'string' ? body.errorCode : '';
+    console.error('[docusign] envelope failed', response.status, code, message.slice(0, 200));
+    throw new Error(code ? `DocuSign could not send the documents (${code}).` : 'DocuSign could not send the documents.');
   }
   return body.envelopeId;
 }
