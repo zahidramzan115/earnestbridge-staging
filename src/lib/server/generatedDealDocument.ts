@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { checkAdmin } from '@/lib/server/adminAuth';
 import { createServiceRoleClient, validateServerEnv } from '@/lib/server/adminUsers';
-import { docxToPdf } from '@/lib/server/docxToPdf';
 import { createSignatureEnvelope, getDocuSignAccessToken, type SignatureFile } from '@/lib/server/docusign';
 import { sendOutboundEmail } from '@/lib/server/outboundEmail';
 import { stampClientSignature } from '@/lib/server/stampSignatureAnchors';
@@ -639,11 +638,10 @@ export async function sendForSignature(context: { params: Promise<{ id: string }
       const { data: file, error: downloadError } = await supabase.storage.from(BUCKET).download(item.row.storage_path as string);
       if (downloadError || !file) throw new Error('Could not read the document.');
       const stamped = stampClientSignature(Buffer.from(await file.arrayBuffer()), String(index + 1));
-      const pdf = await docxToPdf(stamped.docx);
       files.push({
         name: item.spec.label,
         documentId: String(index + 1),
-        pdf,
+        content: stamped.docx,
         signAnchor: stamped.signAnchor,
         dateAnchor: stamped.dateAnchor,
       });

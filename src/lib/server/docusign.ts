@@ -14,7 +14,7 @@ type DocuSignConfig = {
 export type SignatureFile = {
   name: string;
   documentId: string;
-  pdf: Buffer;
+  content: Buffer;
   signAnchor: string;
   dateAnchor: string;
 };
@@ -136,9 +136,9 @@ export async function createSignatureEnvelope(input: {
       emailBlurb: 'Please review and sign the attached EarnestBridge documents.',
       status: 'sent',
       documents: input.files.map((file) => ({
-        documentBase64: file.pdf.toString('base64'),
+        documentBase64: file.content.toString('base64'),
         name: file.name,
-        fileExtension: 'pdf',
+        fileExtension: 'docx',
         documentId: file.documentId,
       })),
       recipients: {
