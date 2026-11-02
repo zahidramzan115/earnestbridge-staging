@@ -57,6 +57,10 @@ export function stampClientSignature(docx: Buffer, anchorId: string): { docx: Bu
       stamped = true;
       return withAnchorRun(paragraph, `${signAnchor} ${dateAnchor}`);
     }
+    if (text === 'MANAGER:') {
+      stamped = true;
+      return withAnchorRun(paragraph, `${signAnchor} ${dateAnchor}`);
+    }
     return paragraph;
   });
   if (!stamped) throw new Error('The signature line was not found.');

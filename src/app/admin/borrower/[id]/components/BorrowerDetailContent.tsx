@@ -48,6 +48,9 @@ interface BorrowerApplication {
   transaction_description?: string | null;
   llc_name?: string | null;
   llc_state?: string | null;
+  llc_act?: string | null;
+  llc_formation_date?: string | null;
+  registered_agent?: string | null;
   client_legal_name?: string | null;
   escrow_agent?: string | null;
   admin_fee?: number | null;

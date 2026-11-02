@@ -23,6 +23,8 @@ const nextConfig = {
       './templates/MOU.docx',
       './templates/Option-Agreement-EMD-Program.docx',
       './templates/EarnestBridge_Affidavit_Ownership_and_Authority.docx',
+      './templates/Operating-Agreement-DRE.docx',
+      './templates/Action-by-Written-Consent-of-Mgr-FORM-NO-SIG.docx',
     ],
   },
 

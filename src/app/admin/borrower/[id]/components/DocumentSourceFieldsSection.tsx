@@ -4,13 +4,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Icon from '@/components/ui/AppIcon';
 import { AFFIDAVIT_FIELD_KEYS } from '@/lib/documents/affidavitFields';
 import { MOU_FIELD_KEYS } from '@/lib/documents/mouFields';
+import { OPERATING_AGREEMENT_FIELD_KEYS } from '@/lib/documents/operatingAgreementFields';
 import { OPTION_FIELD_KEYS } from '@/lib/documents/optionFields';
+import { WRITTEN_CONSENT_FIELD_KEYS } from '@/lib/documents/writtenConsentFields';
 
 export interface DocumentSourceDeal {
   id: string;
   property_address: string | null;
   deposit_amount: number | null;
   llc_name?: string | null;
+  llc_state?: string | null;
+  llc_act?: string | null;
+  llc_formation_date?: string | null;
+  registered_agent?: string | null;
   client_legal_name?: string | null;
   escrow_agent?: string | null;
   admin_fee?: number | null;
@@ -32,6 +38,10 @@ const FIELDS: { key: FieldKey; label: string; kind: 'text' | 'money' | 'date' | 
   { key: 'client_legal_name', label: 'Legal name', kind: 'text' },
   { key: 'property_address', label: 'Property address', kind: 'text' },
   { key: 'llc_name', label: 'LLC name', kind: 'text' },
+  { key: 'llc_state', label: 'LLC state', kind: 'text' },
+  { key: 'llc_act', label: 'LLC act', kind: 'text' },
+  { key: 'llc_formation_date', label: 'LLC formation date', kind: 'date' },
+  { key: 'registered_agent', label: 'Registered agent', kind: 'textarea' },
   { key: 'deposit_amount', label: 'Earnest money amount', kind: 'money' },
   { key: 'escrow_agent', label: 'Escrow agent', kind: 'textarea' },
   { key: 'admin_fee', label: 'Admin fee', kind: 'money' },
@@ -70,7 +80,7 @@ function matchesSaved(key: FieldKey, formValue: string, deal: DocumentSourceDeal
     const amount = Number(form);
     return Number.isFinite(amount) && Math.round(amount * 100) === Math.round(Number(saved) * 100);
   }
-  if (key === 'mou_effective_date' || key === 'option_effective_date') {
+  if (key === 'mou_effective_date' || key === 'option_effective_date' || key === 'llc_formation_date') {
     return form === dateInput(typeof saved === 'string' ? saved : null);
   }
   if (key === 'client_notice_email') {
@@ -143,6 +153,8 @@ export default function DocumentSourceFieldsSection({
   const [mou, setMou] = useState<MouDocument | null>(null);
   const [optionDoc, setOptionDoc] = useState<MouDocument | null>(null);
   const [affidavitDoc, setAffidavitDoc] = useState<MouDocument | null>(null);
+  const [operatingDoc, setOperatingDoc] = useState<MouDocument | null>(null);
+  const [consentDoc, setConsentDoc] = useState<MouDocument | null>(null);
   const [extraBusy, setExtraBusy] = useState<string | null>(null);
 
   useEffect(() => {
@@ -165,6 +177,8 @@ export default function DocumentSourceFieldsSection({
         loadOne('mou', setMou),
         loadOne('option-agreement', setOptionDoc),
         loadOne('affidavit', setAffidavitDoc),
+        loadOne('operating-agreement', setOperatingDoc),
+        loadOne('written-consent', setConsentDoc),
       ]);
     };
     void load();
@@ -192,10 +206,21 @@ export default function DocumentSourceFieldsSection({
     const unsaved = FIELDS.some((field) => AFFIDAVIT_FIELD_KEYS.has(field.key) && !matchesSaved(field.key, values[field.key], deal));
     return { missingLabels, unsaved, ready: missingLabels.length === 0 && !unsaved };
   }, [deal, values]);
+  const operatingReady = useMemo(() => {
+    const missingLabels = FIELDS.filter((field) => OPERATING_AGREEMENT_FIELD_KEYS.has(field.key) && isEmpty(values[field.key])).map((field) => field.label);
+    const unsaved = FIELDS.some((field) => OPERATING_AGREEMENT_FIELD_KEYS.has(field.key) && !matchesSaved(field.key, values[field.key], deal));
+    return { missingLabels, unsaved, ready: missingLabels.length === 0 && !unsaved };
+  }, [deal, values]);
+  const consentReady = useMemo(() => {
+    const missingLabels = FIELDS.filter((field) => WRITTEN_CONSENT_FIELD_KEYS.has(field.key) && isEmpty(values[field.key])).map((field) => field.label);
+    const unsaved = FIELDS.some((field) => WRITTEN_CONSENT_FIELD_KEYS.has(field.key) && !matchesSaved(field.key, values[field.key], deal));
+    return { missingLabels, unsaved, ready: missingLabels.length === 0 && !unsaved };
+  }, [deal, values]);
+  const allDocuments = [mou, optionDoc, affidavitDoc, operatingDoc, consentDoc];
   const controlsLocked = saving || generating || approving || sending || markingClientApproved || signing || Boolean(extraBusy);
-  const hasApprovedDocument = [mou, optionDoc, affidavitDoc].some((document) => document?.status === 'approved');
-  const hasSentDocument = [mou, optionDoc, affidavitDoc].some((document) => document?.status === 'sent_to_client');
-  const hasClientApprovedDocument = [mou, optionDoc, affidavitDoc].some((document) => document?.status === 'client_approved');
+  const hasApprovedDocument = allDocuments.some((document) => document?.status === 'approved');
+  const hasSentDocument = allDocuments.some((document) => document?.status === 'sent_to_client');
+  const hasClientApprovedDocument = allDocuments.some((document) => document?.status === 'client_approved');
 
   const save = async () => {
     setSaving(true);
@@ -328,6 +353,8 @@ export default function DocumentSourceFieldsSection({
       if (document.document_type === 'mou') setMou(document);
       if (document.document_type === 'option_agreement') setOptionDoc(document);
       if (document.document_type === 'affidavit') setAffidavitDoc(document);
+      if (document.document_type === 'operating_agreement') setOperatingDoc(document);
+      if (document.document_type === 'written_consent') setConsentDoc(document);
     }
   }
 
@@ -337,7 +364,7 @@ export default function DocumentSourceFieldsSection({
         <div>
           <h3 className="font-display font-700 text-sm text-gray-900">Document fields</h3>
           <p className="text-xs text-gray-500 mt-1">
-            Save these values on the deal. Generate fills the MOU, Option Agreement, and Affidavit. Nothing is emailed.
+            Save these values on the deal. Generate fills the five source documents. Nothing is emailed.
           </p>
         </div>
       </div>
@@ -347,7 +374,7 @@ export default function DocumentSourceFieldsSection({
           <label key={field.key} className={field.kind === 'textarea' ? 'sm:col-span-2' : ''}>
             <span className="block text-[11px] font-display font-600 text-gray-600 mb-1">
               {field.label}
-              {(MOU_FIELD_KEYS.has(field.key) || OPTION_FIELD_KEYS.has(field.key) || AFFIDAVIT_FIELD_KEYS.has(field.key)) && isEmpty(values[field.key]) && <span className="text-amber-600"> · required</span>}
+              {(MOU_FIELD_KEYS.has(field.key) || OPTION_FIELD_KEYS.has(field.key) || AFFIDAVIT_FIELD_KEYS.has(field.key) || OPERATING_AGREEMENT_FIELD_KEYS.has(field.key) || WRITTEN_CONSENT_FIELD_KEYS.has(field.key)) && isEmpty(values[field.key]) && <span className="text-amber-600"> · required</span>}
             </span>
             {field.kind === 'textarea' ? (
               <textarea
@@ -421,6 +448,30 @@ export default function DocumentSourceFieldsSection({
         statusNote={deliveryNote(affidavitDoc)}
         onGenerate={() => runDocumentAction('affidavit', 'POST', 'affidavit-generate', setAffidavitDoc, 'Could not generate the Affidavit.')}
         onApprove={() => runDocumentAction('affidavit', 'PATCH', 'affidavit-approve', setAffidavitDoc, 'Could not approve the Affidavit.')}
+      />
+      <GeneratedFileCard
+        title="Operating Agreement"
+        document={operatingDoc}
+        ready={operatingReady.ready && !controlsLocked}
+        busy={extraBusy === 'operating-generate' || extraBusy === 'operating-approve'}
+        generating={extraBusy === 'operating-generate'}
+        approving={extraBusy === 'operating-approve'}
+        hint={operatingReady.missingLabels.length > 0 ? `Still empty: ${operatingReady.missingLabels.join(', ')}.` : operatingReady.unsaved ? 'Save document fields before Generate.' : 'Generate creates the Operating Agreement and leaves it pending review.'}
+        statusNote={deliveryNote(operatingDoc)}
+        onGenerate={() => runDocumentAction('operating-agreement', 'POST', 'operating-generate', setOperatingDoc, 'Could not generate the Operating Agreement.')}
+        onApprove={() => runDocumentAction('operating-agreement', 'PATCH', 'operating-approve', setOperatingDoc, 'Could not approve the Operating Agreement.')}
+      />
+      <GeneratedFileCard
+        title="Written Consent"
+        document={consentDoc}
+        ready={consentReady.ready && !controlsLocked}
+        busy={extraBusy === 'consent-generate' || extraBusy === 'consent-approve'}
+        generating={extraBusy === 'consent-generate'}
+        approving={extraBusy === 'consent-approve'}
+        hint={consentReady.missingLabels.length > 0 ? `Still empty: ${consentReady.missingLabels.join(', ')}.` : consentReady.unsaved ? 'Save document fields before Generate.' : 'Generate creates the Written Consent and leaves it pending review.'}
+        statusNote={deliveryNote(consentDoc)}
+        onGenerate={() => runDocumentAction('written-consent', 'POST', 'consent-generate', setConsentDoc, 'Could not generate the Written Consent.')}
+        onApprove={() => runDocumentAction('written-consent', 'PATCH', 'consent-approve', setConsentDoc, 'Could not approve the Written Consent.')}
       />
 
       {(hasApprovedDocument || hasSentDocument || hasClientApprovedDocument) && (
@@ -550,6 +601,10 @@ function emptyValues(deal: DocumentSourceDeal): Record<FieldKey, string> {
     property_address: asText(deal.property_address),
     deposit_amount: asText(deal.deposit_amount),
     llc_name: asText(deal.llc_name),
+    llc_state: asText(deal.llc_state),
+    llc_act: asText(deal.llc_act),
+    llc_formation_date: dateInput(deal.llc_formation_date),
+    registered_agent: asText(deal.registered_agent),
     client_legal_name: asText(deal.client_legal_name),
     escrow_agent: asText(deal.escrow_agent),
     admin_fee: asText(deal.admin_fee),

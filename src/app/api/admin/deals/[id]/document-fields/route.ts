@@ -19,9 +19,12 @@ const TEXT_FIELDS = [
   'psa_title',
   'property_address',
   'llc_name',
+  'llc_state',
+  'llc_act',
+  'registered_agent',
 ] as const;
 
-const DATE_FIELDS = ['mou_effective_date', 'option_effective_date'] as const;
+const DATE_FIELDS = ['mou_effective_date', 'option_effective_date', 'llc_formation_date'] as const;
 const MONEY_FIELDS = ['admin_fee', 'deal_fee', 'deposit_amount'] as const;
 
 const ALLOWED = new Set<string>([...TEXT_FIELDS, ...DATE_FIELDS, ...MONEY_FIELDS, 'client_notice_email']);
@@ -132,7 +135,7 @@ export async function PATCH(
     .eq('id', id)
     .is('purged_at', null)
     .select(
-      'id, property_address, deposit_amount, llc_name, client_legal_name, escrow_agent, admin_fee, deal_fee, option_term, client_notice_address, client_representative_name, client_notice_email, client_signatory_name, client_signatory_title, psa_title, mou_effective_date, option_effective_date'
+      'id, property_address, deposit_amount, llc_name, llc_state, llc_act, llc_formation_date, registered_agent, client_legal_name, escrow_agent, admin_fee, deal_fee, option_term, client_notice_address, client_representative_name, client_notice_email, client_signatory_name, client_signatory_title, psa_title, mou_effective_date, option_effective_date'
     )
     .maybeSingle();
 

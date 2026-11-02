@@ -18,7 +18,7 @@ const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 const DOCUMENT_COLUMNS = 'status, version_number, file_name, storage_path, sent_to_email, sent_at, client_approved_at';
 
 export interface GeneratedDocumentSpec {
-  documentType: 'option_agreement' | 'affidavit';
+  documentType: 'option_agreement' | 'affidavit' | 'operating_agreement' | 'written_consent';
   label: string;
   storageSlug: string;
   fileBase: string;
@@ -376,10 +376,16 @@ export async function sendGeneratedDocument(
   });
 }
 
-const SENDABLE_DOCUMENTS: Array<{ documentType: 'mou' | 'option_agreement' | 'affidavit'; label: string; fileBase: string }> = [
+const SENDABLE_DOCUMENTS: Array<{
+  documentType: 'mou' | 'option_agreement' | 'affidavit' | 'operating_agreement' | 'written_consent';
+  label: string;
+  fileBase: string;
+}> = [
   { documentType: 'mou', label: 'MOU', fileBase: 'MOU' },
   { documentType: 'option_agreement', label: 'Option Agreement', fileBase: 'Option-Agreement' },
   { documentType: 'affidavit', label: 'Affidavit', fileBase: 'Affidavit' },
+  { documentType: 'operating_agreement', label: 'Operating Agreement', fileBase: 'Operating-Agreement' },
+  { documentType: 'written_consent', label: 'Written Consent', fileBase: 'Written-Consent' },
 ];
 
 export async function sendApprovedDocuments(context: { params: Promise<{ id: string }> }) {
@@ -531,7 +537,7 @@ export async function markSentDocumentsClientApproved(context: { params: Promise
     })
     .eq('application_id', id)
     .eq('status', 'sent_to_client')
-    .in('document_type', ['mou', 'option_agreement', 'affidavit'])
+    .in('document_type', SENDABLE_DOCUMENTS.map((spec) => spec.documentType))
     .select(`document_type, ${DOCUMENT_COLUMNS}`);
 
   if (updateError) {
