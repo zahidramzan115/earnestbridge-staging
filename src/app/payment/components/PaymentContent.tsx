@@ -267,10 +267,10 @@ export default function PaymentContent() {
                   maxLength={21}
                   value={invoiceNumber}
                   onChange={(e) => setInvoiceNumber(e.target.value)}
-                  className={inputClass}
-                  required
+                  className={inputClass} 
+                  required 
                 />
-                <p className="text-xs text-gray-500 mt-1">Shown on the invoice we emailed you.</p>
+                <p className="text-xs text-gray-500 mt-1">Shown on the invoice we emailed you. </p>
               </div>
 
               <div>
