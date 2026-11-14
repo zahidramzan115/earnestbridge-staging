@@ -267,7 +267,6 @@ export default function PaymentContent() {
                   maxLength={21}
                   value={invoiceNumber}
                   onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="e.g. 1038"
                   className={inputClass}
                   required
                 />
