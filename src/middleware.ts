@@ -9,6 +9,7 @@ const PUBLIC_PATHS = [
   '/reset-password',
   '/auth/callback',
   '/auth',
+  '/payment',
 ];
 
 // Routes that require admin role

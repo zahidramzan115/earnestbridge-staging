@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Icon from '@/components/ui/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
+import QuickBooksConnectionCard from './QuickBooksConnectionCard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -617,6 +618,9 @@ export default function InvoiceSettingsContent() {
           </button>
         </div>
       )}
+
+      {/* ── QuickBooks Online connection ── */}
+      <QuickBooksConnectionCard canManage={canManageFinancialSettings} />
 
       {/* ── Section 1: Invoice Issuer ── */}
       <section className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
