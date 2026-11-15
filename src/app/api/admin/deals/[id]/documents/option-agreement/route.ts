@@ -18,6 +18,8 @@ const spec: GeneratedDocumentSpec = {
   columns:
     'id, client_legal_name, property_address, llc_name, deposit_amount, option_term, client_notice_address, client_representative_name, client_notice_email, client_signatory_name, client_signatory_title, psa_title, option_effective_date',
   fields: OPTION_SOURCE_FIELDS,
+  // The uploaded PSA is attached after the document as Exhibit A.
+  fixedReplacements: { '[ATTACH PSA]': '' },
 };
 
 export function GET(_request: Request, context: { params: Promise<{ id: string }> }) {

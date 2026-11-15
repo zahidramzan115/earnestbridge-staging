@@ -4,7 +4,18 @@ import { createServiceRoleClient, validateServerEnv } from '@/lib/server/adminUs
 import { createSignatureEnvelope, getDocuSignAccessToken, type SignatureFile } from '@/lib/server/docusign';
 import { syncEnvelopeFromDocuSign } from '@/lib/server/docusignConnect';
 import { sendOutboundEmail } from '@/lib/server/outboundEmail';
-import { stampClientSignature } from '@/lib/server/stampSignatureAnchors';
+import { stampSignatures } from '@/lib/server/stampSignatureAnchors';
+import {
+  PSA_BUCKET,
+  PSA_EXHIBIT_DOCUMENT_TYPES,
+  getDealPsa,
+  type DealPsa,
+} from '@/lib/server/dealPsa';
+import {
+  LLC_AGREEMENT_EXHIBIT_NAME,
+  PSA_EXHIBIT_NAME,
+  WRITTEN_ACTION_EXHIBIT_NAME,
+} from '@/lib/server/envelopeExhibits';
 import {
   missingSourceLabels,
   renderSourceDocument,
@@ -25,6 +36,8 @@ export interface GeneratedDocumentSpec {
   templateFile: string;
   columns: string;
   fields: readonly SourceField[];
+  /** Template text replaced with a fixed value (e.g. a placeholder removed). */
+  fixedReplacements?: Record<string, string>;
 }
 
 function serviceClient() {
@@ -169,7 +182,7 @@ export async function generateGeneratedDocument(
 
   let docx: Buffer;
   try {
-    docx = await renderSourceDocument(spec.templateFile, source, spec.fields);
+    docx = await renderSourceDocument(spec.templateFile, source, spec.fields, spec.fixedReplacements);
   } catch (error) {
     console.error(`[${spec.documentType}] fill failed`, error);
     return NextResponse.json({ error: `Could not generate the ${spec.label}.` }, { status: 500 });
@@ -599,11 +612,8 @@ async function revertClientApproval(supabase: ReturnType<typeof serviceClient>, 
   await supabase.from('deal_documents').update({ status: 'client_approved', docusign_envelope_id: null }).in('id', ids).eq('status', 'sent_for_signature');
 }
 
-export async function sendForSignature(context: { params: Promise<{ id: string }> }) {
-  const access = await authorizedDealId(context);
-  if ('response' in access) return access.response;
-  const { id, supabase } = access;
-
+/** The deal's client signer and envelope subject, or an error response. */
+async function loadClientSigner(supabase: ReturnType<typeof serviceClient>, id: string) {
   const { data: deal, error: dealError } = await supabase
     .from('borrower_applications')
     .select('id, property_address, client_notice_email, client_signatory_name, client_legal_name')
@@ -611,18 +621,30 @@ export async function sendForSignature(context: { params: Promise<{ id: string }
     .is('purged_at', null)
     .maybeSingle();
 
-  if (dealError) return NextResponse.json({ error: 'Could not send the documents for signature.' }, { status: 500 });
-  if (!deal) return NextResponse.json({ error: 'Deal not found.' }, { status: 404 });
+  if (dealError) return { response: NextResponse.json({ error: 'Could not send the documents for signature.' }, { status: 500 }) };
+  if (!deal) return { response: NextResponse.json({ error: 'Deal not found.' }, { status: 404 }) };
 
   const recipient = typeof deal.client_notice_email === 'string' ? deal.client_notice_email.trim().toLowerCase() : '';
   if (!EMAIL_RE.test(recipient)) {
-    return NextResponse.json({ error: 'The deal has no client email address.' }, { status: 400 });
+    return { response: NextResponse.json({ error: 'The deal has no client email address.' }, { status: 400 }) };
   }
   const signerName = (typeof deal.client_signatory_name === 'string' ? deal.client_signatory_name.trim() : '')
     || (typeof deal.client_legal_name === 'string' ? deal.client_legal_name.trim() : '');
   if (!signerName) {
-    return NextResponse.json({ error: 'The deal has no client signatory.' }, { status: 400 });
+    return { response: NextResponse.json({ error: 'The deal has no client signatory.' }, { status: 400 }) };
   }
+  const property = typeof deal.property_address === 'string' ? deal.property_address.trim() : '';
+  const subject = property ? `Please sign your EarnestBridge documents — ${property}` : 'Please sign your EarnestBridge documents';
+  return { client: { email: recipient, name: signerName }, subject };
+}
+
+export async function sendForSignature(context: { params: Promise<{ id: string }> }) {
+  const access = await authorizedDealId(context);
+  if ('response' in access) return access.response;
+  const { id, supabase } = access;
+
+  const signer = await loadClientSigner(supabase, id);
+  if ('response' in signer) return signer.response;
 
   const { data: rows, error: rowsError } = await supabase
     .from('deal_documents')
@@ -632,13 +654,36 @@ export async function sendForSignature(context: { params: Promise<{ id: string }
 
   if (rowsError) return NextResponse.json({ error: 'Could not send the documents for signature.' }, { status: 500 });
 
-  const ready = SENDABLE_DOCUMENTS.flatMap((spec) => {
+  // Round 1. The Affidavit is signed later, with the signed Operating
+  // Agreement and Written Consent attached as its exhibits.
+  const ready = SENDABLE_DOCUMENTS.filter((spec) => spec.documentType !== 'affidavit').flatMap((spec) => {
     const row = (rows ?? []).find((item) => item.document_type === spec.documentType && item.storage_path);
     return row ? [{ spec, row }] : [];
   });
   if (ready.length === 0) {
     return NextResponse.json({ error: 'Mark a document Client approved before sending it for signature.' }, { status: 409 });
   }
+
+  const needsPsa = ready.some((item) => PSA_EXHIBIT_DOCUMENT_TYPES.has(item.spec.documentType));
+  let psa: DealPsa | null = null;
+  if (needsPsa) {
+    try {
+      psa = await getDealPsa(supabase, id);
+    } catch {
+      return NextResponse.json({ error: 'Could not send the documents for signature.' }, { status: 500 });
+    }
+    if (!psa) {
+      return NextResponse.json(
+        { error: 'Upload the executed PSA before sending the Option Agreement or Written Consent for signature.' },
+        { status: 409 }
+      );
+    }
+  }
+
+  const ebSignerEmail = process.env.EB_SIGNER_EMAIL?.trim().toLowerCase() ?? '';
+  const earnestBridge = EMAIL_RE.test(ebSignerEmail)
+    ? { email: ebSignerEmail, name: process.env.EB_SIGNER_NAME?.trim() || 'Daniel J. Miller' }
+    : null;
 
   const ids = ready.map((item) => item.row.id as string);
   const { data: claimed, error: claimError } = await supabase
@@ -654,29 +699,44 @@ export async function sendForSignature(context: { params: Promise<{ id: string }
   }
 
   try {
-    const files: SignatureFile[] = [];
-    for (let index = 0; index < ready.length; index++) {
-      const item = ready[index];
-      const { data: file, error: downloadError } = await supabase.storage.from(BUCKET).download(item.row.storage_path as string);
-      if (downloadError || !file) throw new Error('Could not read the document.');
-      const stamped = stampClientSignature(Buffer.from(await file.arrayBuffer()), String(index + 1));
-      files.push({
-        name: item.spec.label,
-        documentId: String(index + 1),
-        content: stamped.docx,
-        signAnchor: stamped.signAnchor,
-        dateAnchor: stamped.dateAnchor,
-      });
+    let psaBytes: Buffer | null = null;
+    if (psa) {
+      const { data: psaFile, error: psaError } = await supabase.storage.from(PSA_BUCKET).download(psa.storage_path);
+      if (psaError || !psaFile) throw new Error('Could not read the PSA.');
+      psaBytes = Buffer.from(await psaFile.arrayBuffer());
     }
 
-    const property = typeof deal.property_address === 'string' ? deal.property_address.trim() : '';
-    const subject = property ? `Please sign your EarnestBridge documents — ${property}` : 'Please sign your EarnestBridge documents';
+    // Each document, followed by the PSA where the PSA is its Exhibit A.
+    const files: SignatureFile[] = [];
+    for (const item of ready) {
+      const { data: file, error: downloadError } = await supabase.storage.from(BUCKET).download(item.row.storage_path as string);
+      if (downloadError || !file) throw new Error('Could not read the document.');
+      const documentId = String(files.length + 1);
+      const stamped = stampSignatures(Buffer.from(await file.arrayBuffer()), documentId);
+      files.push({
+        name: item.spec.label,
+        documentId,
+        content: stamped.docx,
+        fileExtension: 'docx',
+        anchors: stamped.anchors,
+      });
+      if (psaBytes && PSA_EXHIBIT_DOCUMENT_TYPES.has(item.spec.documentType)) {
+        files.push({
+          name: PSA_EXHIBIT_NAME,
+          documentId: String(files.length + 1),
+          content: psaBytes,
+          fileExtension: 'pdf',
+          anchors: [],
+        });
+      }
+    }
+
     const accessToken = await getDocuSignAccessToken();
     const envelopeId = await createSignatureEnvelope({
       accessToken,
-      email: recipient,
-      signerName,
-      subject,
+      client: signer.client,
+      earnestBridge,
+      subject: signer.subject,
       files,
     });
 
@@ -712,5 +772,94 @@ export async function sendForSignature(context: { params: Promise<{ id: string }
     });
   }
 
+  return NextResponse.json({ documents });
+}
+
+/**
+ * Round 2: the Affidavit, with the signed Operating Agreement (Exhibit A) and
+ * the signed Written Consent (Exhibit B) attached after it. Only the client
+ * signs. Requires both round-1 documents to be signed.
+ */
+export async function sendAffidavitForSignature(context: { params: Promise<{ id: string }> }) {
+  const access = await authorizedDealId(context);
+  if ('response' in access) return access.response;
+  const { id, supabase } = access;
+
+  const signer = await loadClientSigner(supabase, id);
+  if ('response' in signer) return signer.response;
+
+  const { data: rows, error: rowsError } = await supabase
+    .from('deal_documents')
+    .select('id, document_type, status, storage_path, signed_file_path')
+    .eq('application_id', id)
+    .in('document_type', ['affidavit', 'operating_agreement', 'written_consent']);
+  if (rowsError) return NextResponse.json({ error: 'Could not send the Affidavit for signature.' }, { status: 500 });
+
+  const affidavit = (rows ?? []).find((row) => row.document_type === 'affidavit');
+  const operating = (rows ?? []).find((row) => row.document_type === 'operating_agreement');
+  const consent = (rows ?? []).find((row) => row.document_type === 'written_consent');
+
+  if (!affidavit || affidavit.status !== 'client_approved' || !affidavit.storage_path) {
+    return NextResponse.json({ error: 'Mark the Affidavit Client approved before sending it for signature.' }, { status: 409 });
+  }
+  if (operating?.status !== 'signed' || !operating.signed_file_path || consent?.status !== 'signed' || !consent.signed_file_path) {
+    return NextResponse.json(
+      { error: 'The Operating Agreement and Written Consent must be signed before the Affidavit is sent.' },
+      { status: 409 }
+    );
+  }
+
+  const { data: claimed, error: claimError } = await supabase
+    .from('deal_documents')
+    .update({ status: 'sent_for_signature' })
+    .eq('id', affidavit.id)
+    .eq('status', 'client_approved')
+    .select('id');
+  if (claimError || !claimed || claimed.length !== 1) {
+    return NextResponse.json({ error: 'Mark the Affidavit Client approved before sending it for signature.' }, { status: 409 });
+  }
+
+  try {
+    const download = async (path: string) => {
+      const { data, error } = await supabase.storage.from(BUCKET).download(path);
+      if (error || !data) throw new Error('Could not read the document.');
+      return Buffer.from(await data.arrayBuffer());
+    };
+
+    const stamped = stampSignatures(await download(affidavit.storage_path), '1');
+    const files: SignatureFile[] = [
+      { name: 'Affidavit', documentId: '1', content: stamped.docx, fileExtension: 'docx', anchors: stamped.anchors },
+      { name: LLC_AGREEMENT_EXHIBIT_NAME, documentId: '2', content: await download(operating.signed_file_path), fileExtension: 'pdf', anchors: [] },
+      { name: WRITTEN_ACTION_EXHIBIT_NAME, documentId: '3', content: await download(consent.signed_file_path), fileExtension: 'pdf', anchors: [] },
+    ];
+
+    const accessToken = await getDocuSignAccessToken();
+    const envelopeId = await createSignatureEnvelope({
+      accessToken,
+      client: signer.client,
+      earnestBridge: null,
+      subject: signer.subject,
+      files,
+    });
+
+    const { error: envelopeError } = await supabase
+      .from('deal_documents')
+      .update({ docusign_envelope_id: envelopeId })
+      .eq('id', affidavit.id)
+      .eq('status', 'sent_for_signature');
+    if (envelopeError) console.error('[documents] affidavit envelope id save failed', envelopeError);
+  } catch (error) {
+    console.error('[documents] affidavit signature send failed', error);
+    await revertClientApproval(supabase, [affidavit.id]);
+    const message = error instanceof Error ? error.message : '';
+    return NextResponse.json({ error: message || 'Could not send the Affidavit for signature.' }, { status: 500 });
+  }
+
+  const { data: row } = await supabase
+    .from('deal_documents')
+    .select(`document_type, ${DOCUMENT_COLUMNS}`)
+    .eq('id', affidavit.id)
+    .maybeSingle();
+  const documents = row ? [{ document_type: row.document_type, ...(await presented(supabase, row)) }] : [];
   return NextResponse.json({ documents });
 }

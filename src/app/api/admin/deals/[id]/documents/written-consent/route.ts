@@ -15,7 +15,7 @@ const spec: GeneratedDocumentSpec = {
   storageSlug: 'written-consent',
   fileBase: 'Written-Consent',
   templateFile: 'Action-by-Written-Consent-of-Mgr-FORM-NO-SIG.docx',
-  columns: 'id, llc_name, client_representative_name, psa_title',
+  columns: 'id, llc_name, llc_state, client_representative_name, psa_title',
   fields: WRITTEN_CONSENT_SOURCE_FIELDS,
 };
 

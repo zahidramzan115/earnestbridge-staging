@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { createHmac, createSign, timingSafeEqual } from 'crypto';
 import path from 'path';
+import type { SignatureAnchor } from '@/lib/server/stampSignatureAnchors';
 
 type DocuSignConfig = {
   integrationKey: string;
@@ -15,9 +16,12 @@ export type SignatureFile = {
   name: string;
   documentId: string;
   content: Buffer;
-  signAnchor: string;
-  dateAnchor: string;
+  fileExtension: 'docx' | 'pdf';
+  /** Signature lines in this file; empty for exhibits nobody signs (e.g. the PSA). */
+  anchors: SignatureAnchor[];
 };
+
+export type EnvelopeSigner = { email: string; name: string };
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim() ?? '';
@@ -150,15 +154,57 @@ export async function getDocuSignAccessToken(): Promise<string> {
   return body.access_token;
 }
 
+function signerTabs(files: SignatureFile[], party: SignatureAnchor['party']) {
+  const placed = files.flatMap((file) =>
+    file.anchors.filter((anchor) => anchor.party === party).map((anchor) => ({ file, anchor }))
+  );
+  return {
+    count: placed.length,
+    tabs: {
+      signHereTabs: placed.map(({ file, anchor }) => ({
+        documentId: file.documentId,
+        anchorString: anchor.signAnchor,
+        anchorUnits: 'pixels',
+        anchorXOffset: '0',
+        anchorYOffset: '-5',
+      })),
+      dateSignedTabs: placed.map(({ file, anchor }) => ({
+        documentId: file.documentId,
+        anchorString: anchor.dateAnchor,
+        anchorUnits: 'pixels',
+        anchorXOffset: '140',
+        anchorYOffset: '-5',
+      })),
+    },
+  };
+}
+
+/**
+ * Creates and sends an envelope. The client and EarnestBridge sign in
+ * parallel; a signer is only added when the documents have lines for them.
+ */
 export async function createSignatureEnvelope(input: {
   accessToken: string;
-  email: string;
-  signerName: string;
+  client: EnvelopeSigner;
+  earnestBridge: EnvelopeSigner | null;
   subject: string;
   files: SignatureFile[];
 }): Promise<string> {
   const settings = config();
   const subject = input.subject.slice(0, 100);
+
+  const signers = [];
+  const clientTabs = signerTabs(input.files, 'client');
+  if (clientTabs.count > 0) {
+    signers.push({ email: input.client.email, name: input.client.name, recipientId: '1', routingOrder: '1', tabs: clientTabs.tabs });
+  }
+  const ebTabs = signerTabs(input.files, 'earnestbridge');
+  if (ebTabs.count > 0) {
+    if (!input.earnestBridge) throw new Error('The EarnestBridge signer is not configured.');
+    signers.push({ email: input.earnestBridge.email, name: input.earnestBridge.name, recipientId: '2', routingOrder: '1', tabs: ebTabs.tabs });
+  }
+  if (signers.length === 0) throw new Error('The signature line was not found.');
+
   const response = await fetch(`${settings.basePath}/v2.1/accounts/${settings.accountId}/envelopes`, {
     method: 'POST',
     headers: {
@@ -171,36 +217,11 @@ export async function createSignatureEnvelope(input: {
       status: 'sent',
       documents: input.files.map((file) => ({
         documentBase64: file.content.toString('base64'),
-        name: `${file.name}.docx`,
-        fileExtension: 'docx',
+        name: `${file.name}.${file.fileExtension}`,
+        fileExtension: file.fileExtension,
         documentId: file.documentId,
       })),
-      recipients: {
-        signers: [
-          {
-            email: input.email,
-            name: input.signerName,
-            recipientId: '1',
-            routingOrder: '1',
-            tabs: {
-              signHereTabs: input.files.map((file) => ({
-                documentId: file.documentId,
-                anchorString: file.signAnchor,
-                anchorUnits: 'pixels',
-                anchorXOffset: '0',
-                anchorYOffset: '-5',
-              })),
-              dateSignedTabs: input.files.map((file) => ({
-                documentId: file.documentId,
-                anchorString: file.dateAnchor,
-                anchorUnits: 'pixels',
-                anchorXOffset: '140',
-                anchorYOffset: '-5',
-              })),
-            },
-          },
-        ],
-      },
+      recipients: { signers },
     }),
   });
   const body = await response.json().catch(() => ({}));

@@ -12,7 +12,7 @@ const BUCKET = 'borrower-documents';
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 const DEAL_COLUMNS =
-  'id, client_legal_name, property_address, deposit_amount, escrow_agent, admin_fee, deal_fee, option_term, client_notice_address, client_representative_name, client_notice_email, client_signatory_name, client_signatory_title, mou_effective_date';
+  'id, client_legal_name, property_address, psa_title, deposit_amount, escrow_agent, service_fee, option_term, client_notice_address, client_representative_name, client_notice_email, client_signatory_name, client_signatory_title, mou_effective_date';
 
 function serviceClient() {
   const env = validateServerEnv();

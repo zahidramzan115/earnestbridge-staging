@@ -7,6 +7,7 @@ import { MOU_FIELD_KEYS } from '@/lib/documents/mouFields';
 import { OPERATING_AGREEMENT_FIELD_KEYS } from '@/lib/documents/operatingAgreementFields';
 import { OPTION_FIELD_KEYS } from '@/lib/documents/optionFields';
 import { WRITTEN_CONSENT_FIELD_KEYS } from '@/lib/documents/writtenConsentFields';
+import PsaExhibitPanel from './PsaExhibitPanel';
 
 export interface DocumentSourceDeal {
   id: string;
@@ -19,8 +20,7 @@ export interface DocumentSourceDeal {
   registered_agent?: string | null;
   client_legal_name?: string | null;
   escrow_agent?: string | null;
-  admin_fee?: number | null;
-  deal_fee?: number | null;
+  service_fee?: number | null;
   option_term?: string | null;
   client_notice_address?: string | null;
   client_representative_name?: string | null;
@@ -44,8 +44,7 @@ const FIELDS: { key: FieldKey; label: string; kind: 'text' | 'money' | 'date' | 
   { key: 'registered_agent', label: 'Registered agent', kind: 'textarea' },
   { key: 'deposit_amount', label: 'Earnest money amount', kind: 'money' },
   { key: 'escrow_agent', label: 'Escrow agent', kind: 'textarea' },
-  { key: 'admin_fee', label: 'Admin fee', kind: 'money' },
-  { key: 'deal_fee', label: 'Deal fee', kind: 'money' },
+  { key: 'service_fee', label: 'Service fee', kind: 'money' },
   { key: 'option_term', label: 'Option term', kind: 'text' },
   { key: 'client_notice_address', label: 'Notice address', kind: 'textarea' },
   { key: 'client_representative_name', label: 'Representative', kind: 'text' },
@@ -74,7 +73,7 @@ function isEmpty(value: string): boolean {
 function matchesSaved(key: FieldKey, formValue: string, deal: DocumentSourceDeal): boolean {
   const form = formValue.trim();
   const saved = deal[key];
-  if (key === 'deposit_amount' || key === 'admin_fee' || key === 'deal_fee') {
+  if (key === 'deposit_amount' || key === 'service_fee') {
     if (form === '') return saved === null || saved === undefined;
     if (saved === null || saved === undefined) return false;
     const amount = Number(form);
@@ -150,6 +149,9 @@ export default function DocumentSourceFieldsSection({
   const [confirmClientApproval, setConfirmClientApproval] = useState(false);
   const [signing, setSigning] = useState(false);
   const [confirmSignature, setConfirmSignature] = useState(false);
+  const [signingAffidavit, setSigningAffidavit] = useState(false);
+  const [confirmAffidavit, setConfirmAffidavit] = useState(false);
+  const [affidavitError, setAffidavitError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -225,10 +227,13 @@ export default function DocumentSourceFieldsSection({
     }, 12000);
     return () => window.clearInterval(timer);
   }, [waitingForSignature, loadDocuments]);
-  const controlsLocked = saving || generating || approving || sending || markingClientApproved || signing || Boolean(extraBusy);
+  const controlsLocked = saving || generating || approving || sending || markingClientApproved || signing || signingAffidavit || Boolean(extraBusy);
   const hasApprovedDocument = allDocuments.some((document) => document?.status === 'approved');
   const hasSentDocument = allDocuments.some((document) => document?.status === 'sent_to_client');
-  const hasClientApprovedDocument = allDocuments.some((document) => document?.status === 'client_approved');
+  // Round 1 signature. The Affidavit is signed separately (round 2) below.
+  const hasClientApprovedDocument = [mou, optionDoc, operatingDoc, consentDoc].some((document) => document?.status === 'client_approved');
+  const affidavitAwaitingSignature = affidavitDoc?.status === 'client_approved';
+  const affidavitExhibitsSigned = operatingDoc?.status === 'signed' && consentDoc?.status === 'signed';
 
   const save = async () => {
     setSaving(true);
@@ -356,6 +361,25 @@ export default function DocumentSourceFieldsSection({
     }
   };
 
+  const sendAffidavitForSignature = async () => {
+    setSigningAffidavit(true);
+    setAffidavitError(null);
+    try {
+      const response = await fetch(`/api/admin/deals/${deal.id}/documents/sign-affidavit`, { method: 'POST' });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setAffidavitError(typeof body.error === 'string' ? body.error : 'Could not send the Affidavit for signature.');
+        return;
+      }
+      applyReturnedDocuments(Array.isArray(body.documents) ? body.documents : []);
+      setConfirmAffidavit(false);
+    } catch {
+      setAffidavitError('Could not send the Affidavit for signature.');
+    } finally {
+      setSigningAffidavit(false);
+    }
+  };
+
   function applyReturnedDocuments(documents: MouDocument[]) {
     for (const document of documents) {
       if (document.document_type === 'mou') setMou(document);
@@ -419,6 +443,8 @@ export default function DocumentSourceFieldsSection({
           {saving ? 'Saving…' : 'Save document fields'}
         </button>
       </div>
+
+      <PsaExhibitPanel dealId={deal.id} />
 
       <GeneratedFileCard
         title="MOU"
@@ -576,6 +602,58 @@ export default function DocumentSourceFieldsSection({
           {sendError && <p className="mt-2 text-xs text-red-700">{sendError}</p>}
         </div>
       )}
+
+      {affidavitAwaitingSignature && (
+        <div className="mt-4 rounded-lg border border-gray-200 px-3 py-3">
+          {!affidavitExhibitsSigned ? (
+            <p className="text-[11px] text-gray-500">
+              The Affidavit is sent for signature after the Operating Agreement and Written Consent are signed. They are attached to it as Exhibits A and B.
+            </p>
+          ) : confirmAffidavit ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[11px] text-gray-700">
+                Send the Affidavit for signature, with the signed Operating Agreement and Written Consent attached? DocuSign will email the client a signing link.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmAffidavit(false)}
+                  disabled={signingAffidavit}
+                  className="inline-flex items-center px-3 py-1.5 text-xs font-display font-700 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={sendAffidavitForSignature}
+                  disabled={signingAffidavit}
+                  className="inline-flex items-center px-3 py-1.5 text-xs font-display font-700 rounded-lg bg-eb-green-900 text-white hover:bg-eb-green-800 disabled:opacity-50"
+                >
+                  {signingAffidavit ? 'Sending…' : 'Confirm'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[11px] text-gray-500">
+                Ready: the signed Operating Agreement and Written Consent will be attached as Exhibits A and B.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setAffidavitError(null);
+                  setConfirmAffidavit(true);
+                }}
+                disabled={controlsLocked}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-display font-700 rounded-lg bg-eb-green-900 text-white hover:bg-eb-green-800 disabled:opacity-50"
+              >
+                Send Affidavit for Signature
+              </button>
+            </div>
+          )}
+          {affidavitError && <p className="mt-2 text-xs text-red-700">{affidavitError}</p>}
+        </div>
+      )}
     </div>
   );
 
@@ -615,8 +693,7 @@ function emptyValues(deal: DocumentSourceDeal): Record<FieldKey, string> {
     registered_agent: asText(deal.registered_agent),
     client_legal_name: asText(deal.client_legal_name),
     escrow_agent: asText(deal.escrow_agent),
-    admin_fee: asText(deal.admin_fee),
-    deal_fee: asText(deal.deal_fee),
+    service_fee: asText(deal.service_fee),
     option_term: asText(deal.option_term),
     client_notice_address: asText(deal.client_notice_address),
     client_representative_name: asText(deal.client_representative_name),

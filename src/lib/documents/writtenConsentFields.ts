@@ -1,5 +1,6 @@
 export const WRITTEN_CONSENT_SOURCE_FIELDS = [
   { key: 'llc_name', label: 'LLC name', token: '[LLC]', kind: 'text' },
+  { key: 'llc_state', label: 'LLC state', token: '[LLC STATE]', kind: 'text' },
   { key: 'client_representative_name', label: 'Representative', token: '[CLIENT REPRESENTATIVE]', kind: 'text' },
   { key: 'psa_title', label: 'PSA title', token: '[PSA TITLE]', kind: 'text' },
 ] as const;

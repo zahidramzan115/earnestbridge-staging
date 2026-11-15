@@ -1,4 +1,6 @@
+import { PDFDocument } from 'pdf-lib';
 import { createServiceRoleClient, validateServerEnv } from '@/lib/server/adminUsers';
+import { isExhibitEnvelopeFile } from '@/lib/server/envelopeExhibits';
 import {
   downloadEnvelopeFile,
   expectedConnectAccountId,
@@ -9,6 +11,15 @@ import {
 
 const BUCKET = 'borrower-documents';
 const PDF_TYPE = 'application/pdf';
+
+/** Signed document followed by its exhibit, as one PDF. */
+async function appendPdf(main: Buffer, exhibit: Buffer): Promise<Buffer> {
+  const merged = await PDFDocument.load(main, { ignoreEncryption: true });
+  const extra = await PDFDocument.load(exhibit, { ignoreEncryption: true });
+  const pages = await merged.copyPages(extra, extra.getPageIndices());
+  for (const page of pages) merged.addPage(page);
+  return Buffer.from(await merged.save());
+}
 
 const DOCUMENT_NAMES: Array<{ documentType: string; label: string; slug: string }> = [
   { documentType: 'mou', label: 'MOU', slug: 'mou' },
@@ -155,19 +166,31 @@ async function applyCompletedEnvelope(
   );
   const assigned = new Set<string>();
 
-  for (const file of files) {
+  let mainDocumentsSeen = 0;
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const file = files[fileIndex];
     if (file.documentId === 'combined' || file.type === 'summary') continue;
+    // Exhibits are joined onto the document before them, below.
+    if (isExhibitEnvelopeFile(file.name)) continue;
     const isCertificate = file.documentId === 'certificate' || /certificate of completion/i.test(file.name);
     const spec = isCertificate ? null : matchType(file.name);
     let targets = spec ? typedRows.filter((row) => row.document_type === spec.documentType) : [];
+    // Fallback when the name does not match: position among the main
+    // documents (exhibits and the certificate are not counted).
+    const mainIndex = isCertificate ? -1 : mainDocumentsSeen++;
     if (!isCertificate && targets.length === 0) {
-      const index = Number.parseInt(file.documentId, 10) - 1;
-      const fallback = Number.isInteger(index) ? orderedRows[index] : undefined;
+      const fallback = orderedRows[mainIndex];
       if (fallback && !assigned.has(fallback.id)) targets = [fallback];
     }
     if (!isCertificate && targets.length === 0) continue;
 
-    const pdf = await downloadEnvelopeFile(accessToken, envelopeId, file.documentId);
+    let pdf = await downloadEnvelopeFile(accessToken, envelopeId, file.documentId);
+    // Join every exhibit that directly follows this document (e.g. the PSA,
+    // or the Affidavit's Exhibits A and B), in envelope order.
+    for (let next = fileIndex + 1; !isCertificate && next < files.length && isExhibitEnvelopeFile(files[next].name); next++) {
+      const exhibit = await downloadEnvelopeFile(accessToken, envelopeId, files[next].documentId);
+      pdf = await appendPdf(pdf, exhibit);
+    }
     if (isCertificate) {
       const storagePath = `generated/${dealId}/signed/${envelopeId}-certificate.pdf`;
       const { error: uploadError } = await supabase.storage.from(BUCKET).upload(storagePath, pdf, {

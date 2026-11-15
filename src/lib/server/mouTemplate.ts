@@ -6,10 +6,10 @@ import { fillDocx } from '@/lib/server/fillDocx';
 export interface MouSourceDeal {
   client_legal_name?: string | null;
   property_address?: string | null;
+  psa_title?: string | null;
   deposit_amount?: number | string | null;
   escrow_agent?: string | null;
-  admin_fee?: number | string | null;
-  deal_fee?: number | string | null;
+  service_fee?: number | string | null;
   option_term?: string | null;
   client_notice_address?: string | null;
   client_representative_name?: string | null;
@@ -45,7 +45,7 @@ function dateValue(value: string | null | undefined): string {
 }
 
 export function mouFieldValue(deal: MouSourceDeal, key: MouFieldKey): string {
-  if (key === 'deposit_amount' || key === 'admin_fee' || key === 'deal_fee') return moneyValue(deal[key]);
+  if (key === 'deposit_amount' || key === 'service_fee') return moneyValue(deal[key]);
   if (key === 'mou_effective_date') return dateValue(deal.mou_effective_date);
   return textValue(deal[key]);
 }

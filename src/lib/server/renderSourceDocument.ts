@@ -60,14 +60,15 @@ export function missingSourceLabels(deal: SourceDeal, fields: readonly SourceFie
 export async function renderSourceDocument(
   templateFile: string,
   deal: SourceDeal,
-  fields: readonly SourceField[]
+  fields: readonly SourceField[],
+  fixedReplacements: Record<string, string> = {}
 ): Promise<Buffer> {
   const missing = missingSourceLabels(deal, fields);
   if (missing.length > 0) {
     throw new Error(`Missing document fields: ${missing.join(', ')}`);
   }
   const template = await readFile(path.join(process.cwd(), 'templates', templateFile));
-  const replacements: Record<string, string> = {};
+  const replacements: Record<string, string> = { ...fixedReplacements };
   for (const field of fields) {
     replacements[field.token] = sourceFieldValue(deal, field);
   }

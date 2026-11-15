@@ -127,6 +127,24 @@ export function plainDocxText(xml: string): string {
   return decodeXml(xml.replace(/<[^>]+>/g, ''));
 }
 
+// Bracketed text that is part of the legal wording, not a field to fill.
+const STATIC_BRACKET_TEXT = new Set([
+  '[Signature Page to Follow]',
+  '[SIGNATURES ON THE FOLLOWING PAGE]',
+  '[Remainder of the page intentionally left blank. Signature pages follow.]',
+]);
+
+/** Every [...] in the template must be a field we fill or known static text. */
+function assertKnownPlaceholders(name: string, xml: string, replacements: Record<string, string>): void {
+  const found = plainDocxText(xml).match(/\[[^[\]]{1,100}\]/g) ?? [];
+  const unknown = [...new Set(found)].filter(
+    (text) => !Object.prototype.hasOwnProperty.call(replacements, text) && !STATIC_BRACKET_TEXT.has(text),
+  );
+  if (unknown.length > 0) {
+    throw new Error(`Template has placeholders with no value in ${name}: ${unknown.join(', ')}`);
+  }
+}
+
 export function fillDocx(template: Buffer, replacements: Record<string, string>): Buffer {
   const tokens = Object.entries(replacements).sort((a, b) => b[0].length - a[0].length);
   const zip = new PizZip(template);
@@ -134,6 +152,7 @@ export function fillDocx(template: Buffer, replacements: Record<string, string>)
     if (!PART_RE.test(name)) continue;
     const file = zip.file(name);
     if (!file) continue;
+    assertKnownPlaceholders(name, file.asText(), replacements);
     const filled = fillXml(file.asText(), tokens);
     const text = plainDocxText(filled);
     const left = tokens.filter(([token]) => text.includes(token)).map(([token]) => token);

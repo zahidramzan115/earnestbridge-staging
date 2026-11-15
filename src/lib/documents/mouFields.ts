@@ -1,10 +1,10 @@
 export const MOU_SOURCE_FIELDS = [
   { key: 'client_legal_name', label: 'Legal name', token: '[CLIENT]', kind: 'text' },
   { key: 'property_address', label: 'Property address', token: '[PROPERTY ADDRESS]', kind: 'text' },
+  { key: 'psa_title', label: 'PSA title', token: '[PSA TITLE]', kind: 'text' },
   { key: 'deposit_amount', label: 'Earnest money amount', token: '[EMD AMOUNT]', kind: 'money' },
   { key: 'escrow_agent', label: 'Escrow agent', token: '[ESCROW AGENT]', kind: 'text' },
-  { key: 'admin_fee', label: 'Admin fee', token: '[ADMIN FEE]', kind: 'money' },
-  { key: 'deal_fee', label: 'Deal fee', token: '[DEAL FEE]', kind: 'money' },
+  { key: 'service_fee', label: 'Service fee', token: '[SERVICE FEE]', kind: 'money' },
   { key: 'option_term', label: 'Option term', token: '[OPTION TERM]', kind: 'text' },
   { key: 'client_notice_address', label: 'Notice address', token: '[CLIENT NOTICE ADDRESS]', kind: 'text' },
   { key: 'client_representative_name', label: 'Representative', token: '[REPRESENTATIVE]', kind: 'text' },

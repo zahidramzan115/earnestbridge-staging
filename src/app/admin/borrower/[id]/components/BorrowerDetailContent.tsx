@@ -53,8 +53,7 @@ interface BorrowerApplication {
   registered_agent?: string | null;
   client_legal_name?: string | null;
   escrow_agent?: string | null;
-  admin_fee?: number | null;
-  deal_fee?: number | null;
+  service_fee?: number | null;
   option_term?: string | null;
   client_notice_address?: string | null;
   client_representative_name?: string | null;
