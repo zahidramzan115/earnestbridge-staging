@@ -196,6 +196,13 @@ export default function PaymentContent() {
     setError(message ? { text: message } : null);
   }
 
+  /** Back to the first screen with an empty form. */
+  function payAnotherInvoice() {
+    startOver();
+    setInvoiceNumber('');
+    setIdentifier('');
+  }
+
   const invoice = verified?.invoice;
 
   return (
@@ -408,6 +415,15 @@ export default function PaymentContent() {
                     Try again
                   </button>
                 </>
+              )}
+              {result !== 'declined' && (
+                <button
+                  type="button"
+                  onClick={payAnotherInvoice}
+                  className="w-full rounded-lg border border-gray-300 text-sm font-600 text-gray-700 py-2.5 hover:bg-gray-50"
+                >
+                  Pay Another Invoice
+                </button>
               )}
             </div>
           )}
